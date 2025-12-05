@@ -1,0 +1,14 @@
+[package]
+name = "yengine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+futures = "0.3.31"
+futures_codec = "0.4.1"
+
+anyhow = "1.0.100"
+
+facet = { version = "0.31.8", features = ["reflect"] }
+thiserror = "2.0.17"
+
