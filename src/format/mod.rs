@@ -1,25 +1,7 @@
 //! Format of messages in the Yate Engine external module protocol.
 //!
-//! ## Format of commands and notifications
-//!
-//! Every command is sent on its own newline (`\n`, `^J`, decimal `10`) delimited line.
-//!
-//! Any value that contains special characters (ASCII `<32`)
-//! MUST have them converted to `%<upcode>` where `<upcode>` is the character
-//! with a numeric value equal with `64 + original ASCII code`.
-//!
-//! The `%` character itself MUST be converted to a special `%%` representation.
-//! Characters with codes `>=32` (except `%`) SHOULD not be escaped but may be so.
-//!
-//! A `%`-escaped code may be received instead of an unescaped character anywhere
-//! except in the initial keyword or the delimiting colon (`:`) characters.
-//!
-//! Anywhere in the line except the initial keyword,
-//! a `%` character not followed by a character with
-//! a numeric value `>64` (`40H`, `0x40`, `'@'`)
-//! or another `%` is an error.
-//!
 //! ## Command direction
+//!
 //! Command direction is anotated by the following prefixes in the
 //! structures documentations:
 //! - **(>)**: _Application_ to _Engine_
@@ -31,7 +13,7 @@ use std::collections::HashMap;
 mod error;
 pub use error::{Error, Result};
 
-mod encoding;
+pub mod upcode;
 
 mod de;
 pub use de::*;
