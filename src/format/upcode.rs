@@ -23,7 +23,7 @@ use std::borrow::Cow;
 
 use thiserror::Error;
 
-/// An error that may occur while decoding `%`-encoded strings.
+/// An error that may occur while decoding `%`-encoded values.
 #[derive(Debug, Error)]
 #[error("invalid upcode `{0}`, not in 64..=127 range")]
 pub struct DecodeError(char);
@@ -39,7 +39,7 @@ fn updecode(ch: char) -> Result<char, DecodeError> {
     }
 }
 
-/// Decode a `%`-encoded string in the context of value parsing.
+/// Decode a `%`-encoded value to a string.
 pub fn decode(value: &str) -> Result<Cow<'_, str>, DecodeError> {
     if !value.contains('%') {
         return Ok(value.into());
@@ -69,7 +69,7 @@ fn upencode(ch: char) -> char {
     }
 }
 
-/// Encode a `%`-encoded string in the context of value encoding.
+/// Encode a string to a `%`-encoded value.
 pub fn encode(value: &str) -> Cow<'_, str> {
     let pred = |ch: &char| ch.is_ascii_control() || matches!(ch, '%' | ':');
     let encodable = value.chars().filter(pred).count();
