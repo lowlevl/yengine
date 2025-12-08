@@ -1,65 +1,97 @@
-use facet::{Def, Facet, FieldFlags, Partial, Type, UserType};
+use std::str::Split;
+
+use facet::{Def, Facet, FieldFlags, Partial, Type, TypedPartial, UserType};
 
 use super::{Error, Result};
 
-pub fn from_str<T: Facet<'static>>(input: &str) -> Result<T> {
-    let mut partial = Partial::alloc::<T>()?;
+struct Deserializer<'de, T> {
+    parts: Split<'de, &'static str>,
+    partial: TypedPartial<'de, T>,
+}
 
-    let Some(tag) = partial.shape().type_tag else {
-        panic!("unable to deserialize untagged types")
-    };
+impl<'de, T: Facet<'de>> Deserializer<'de, T> {
+    fn deserialize_tag(&mut self) -> Result<&str> {
+        self.parts.next().ok_or(Error::MissingTag)
+    }
 
-    let mut parts = input.split(":");
-    match parts.next() {
-        None => Err(Error::MissingTag),
-        Some(first) if first != tag => Err(Error::MismatchedTag(first.into(), tag)),
+    fn deserialize_scalar(&mut self, idx: usize) -> Result<()> {
+        let Some(value) = self.parts.next() else {
+            return Err(Error::MissingValue);
+        };
 
-        Some(_) => {
-            let Type::User(UserType::Struct(ty)) = partial.shape().ty else {
-                panic!("unable to deserialize non-structs")
+        self.partial
+            .begin_nth_field(idx)?
+            .begin_custom_deserialization()?
+            .parse_from_str(value)?
+            .end()?;
+
+        Ok(())
+    }
+
+    fn deserialize_map(&mut self, idx: usize) -> Result<()> {
+        self.partial
+            .begin_nth_field(idx)?
+            .begin_custom_deserialization()?
+            .begin_map()?;
+
+        for value in self.parts.by_ref() {
+            let Some((name, value)) = value.split_once('=') else {
+                return Err(Error::MisformatedMap);
             };
 
-            for (idx, field) in ty.fields.iter().enumerate() {
-                let partial = partial.begin_nth_field(idx)?;
-
-                match field.shape().def {
-                    Def::Scalar => {
-                        let Some(value) = parts.next() else {
-                            return Err(Error::MissingField(field.shape()));
-                        };
-
-                        partial.parse_from_str(value)?;
-                    }
-
-                    Def::Map(_) if field.flags.contains(FieldFlags::FLATTEN) => {
-                        let partial = partial.begin_map()?;
-
-                        for value in parts.by_ref() {
-                            let Some((name, value)) = value.split_once('=') else {
-                                return Err(Error::MisformatedMap);
-                            };
-
-                            {
-                                let partial = partial.begin_key()?;
-                                partial.parse_from_str(name)?;
-                                partial.end()?;
-                            }
-
-                            {
-                                let partial = partial.begin_value()?;
-                                partial.parse_from_str(value)?;
-                                partial.end()?;
-                            }
-                        }
-                    }
-                    _ => panic!("unable to deserialize {:?}", field.shape()),
-                };
-
-                partial.end()?;
-            }
-
-            let boxed = partial.build()?;
-            Ok(*boxed)
+            // NOTE: could be a recursive deserialization of k,v too
+            self.partial
+                .begin_key()?
+                .parse_from_str(name)?
+                .end()?
+                .begin_value()?
+                .parse_from_str(value)?
+                .end()?;
         }
+
+        self.partial.end()?;
+
+        Ok(())
     }
+
+    fn deserialize(mut self) -> Result<T> {
+        if self.partial.shape().type_tag != Some(self.deserialize_tag()?) {
+            return Err(Error::MismatchedTag);
+        }
+
+        let Type::User(UserType::Struct(st)) = self.partial.shape().ty else {
+            panic!(
+                "type `{}` is not a struct",
+                self.partial.shape().type_identifier
+            )
+        };
+
+        for (idx, field) in st.fields.iter().enumerate() {
+            match field.shape().def {
+                Def::Scalar => self.deserialize_scalar(idx)?,
+                Def::Map(_) if field.flags.contains(FieldFlags::FLATTEN) => {
+                    self.deserialize_map(idx)?
+                }
+
+                _ => panic!(
+                    "unable to deserialize type `{}`",
+                    field.shape().type_identifier
+                ),
+            }
+        }
+
+        let boxed = self.partial.build()?;
+        Ok(*boxed)
+    }
+}
+
+/// Deserialize an instance of `T` from it's textual representation.
+pub fn from_str<'de, T: Facet<'de>>(input: &'de str) -> Result<T> {
+    let partial = Partial::alloc::<T>()?;
+    let de = Deserializer {
+        parts: input.split(":"),
+        partial,
+    };
+
+    de.deserialize()
 }
