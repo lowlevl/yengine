@@ -267,3 +267,14 @@ pub struct Connect {
     /// Type of data channel, assuming `audio` if `None`.
     type_: Option<String>,
 }
+
+/// **(>)** The [`Quit`] message is used to tell the engine
+/// we'd like to stop processing messages.
+#[derive(Debug, facet::Facet)]
+#[facet(type_tag = "%%>quit")]
+pub struct Quit;
+
+/// **(<)** The [`QuitAck`] message signals we can proceed to exit.
+#[derive(Debug, facet::Facet)]
+#[facet(type_tag = "%%<quit")]
+pub struct QuitAck;
