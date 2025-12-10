@@ -6,10 +6,10 @@ use super::{Error, Result};
 
 struct Deserializer<'de, T> {
     parts: Split<'de, &'static str>,
-    partial: TypedPartial<'de, T>,
+    partial: TypedPartial<'static, T>,
 }
 
-impl<'de, T: Facet<'de>> Deserializer<'de, T> {
+impl<'de, T: Facet<'static>> Deserializer<'de, T> {
     fn deserialize_tag(&mut self) -> Result<&str> {
         self.parts.next().ok_or(Error::MissingTag)
     }
@@ -86,7 +86,7 @@ impl<'de, T: Facet<'de>> Deserializer<'de, T> {
 }
 
 /// Deserialize an instance of `T` from it's textual representation.
-pub fn from_str<'de, T: Facet<'de>>(input: &'de str) -> Result<T> {
+pub fn from_str<T: Facet<'static>>(input: &str) -> Result<T> {
     let partial = Partial::alloc::<T>()?;
     let de = Deserializer {
         parts: input.split(":"),
