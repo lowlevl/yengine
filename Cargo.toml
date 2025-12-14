@@ -9,7 +9,7 @@ futures_codec = "0.4.1"
 
 anyhow = "1.0.100"
 
-facet = { version = "0.31.8", features = ["reflect"] }
+facet = { version = "0.32.2", features = ["reflect"] }
 thiserror = "2.0.17"
 dashmap = "6.1.0"
 
