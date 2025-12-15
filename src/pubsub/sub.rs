@@ -10,14 +10,14 @@ pub struct Sub<I: PubSubable> {
 }
 
 impl<I: PubSubable> Sub<I> {
-    pub fn new(inner: Arc<Inner<I>>, topic: I::Topic) -> Self {
+    pub(super) fn new(inner: Arc<Inner<I>>, topic: I::Topic) -> Self {
         Self { inner, topic }
     }
 }
 
 impl<I: PubSubable> Drop for Sub<I> {
     fn drop(&mut self) {
-        self.inner.wakers.remove(&self.topic);
+        self.inner.wakers.write().unwrap().remove(&self.topic);
     }
 }
 
@@ -28,7 +28,7 @@ impl<I: PubSubable> Stream for Sub<I> {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        if let Some(waker) = self.inner.wakers.get(&self.topic) {
+        if let Some(waker) = self.inner.wakers.read().unwrap().get(&self.topic) {
             // Register this task for other `Sub`s to wake
             waker.register(cx.waker());
         } else {

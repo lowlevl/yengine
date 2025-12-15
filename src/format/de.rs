@@ -13,7 +13,11 @@ impl<'de> Deserializer<'de> {
         self.parts.next().ok_or(Error::MissingTag)
     }
 
-    fn deserialize_scalar(&mut self, partial: Partial<'de>, idx: usize) -> Result<Partial<'de>> {
+    fn deserialize_scalar(
+        &mut self,
+        partial: Partial<'static>,
+        idx: usize,
+    ) -> Result<Partial<'static>> {
         let Some(value) = self.parts.next() else {
             return Err(Error::MissingValue);
         };
@@ -25,7 +29,11 @@ impl<'de> Deserializer<'de> {
             .end()?)
     }
 
-    fn deserialize_map(&mut self, mut partial: Partial<'de>, idx: usize) -> Result<Partial<'de>> {
+    fn deserialize_map(
+        &mut self,
+        mut partial: Partial<'static>,
+        idx: usize,
+    ) -> Result<Partial<'static>> {
         partial = partial
             .begin_nth_field(idx)?
             .begin_custom_deserialization()?
@@ -49,7 +57,7 @@ impl<'de> Deserializer<'de> {
         Ok(partial.end()?)
     }
 
-    fn deserialize<T: facet::Facet<'de>>(mut self, mut partial: Partial<'de>) -> Result<T> {
+    fn deserialize<T: facet::Facet<'static>>(mut self, mut partial: Partial<'static>) -> Result<T> {
         if partial.shape().type_tag != Some(self.deserialize_tag()?) {
             return Err(Error::MismatchedTag);
         }
@@ -77,7 +85,7 @@ impl<'de> Deserializer<'de> {
 }
 
 /// Deserialize an instance of `T` from it's textual representation.
-pub fn from_str<'de, T: Facet<'de>>(input: &'de str) -> Result<T> {
+pub fn from_str<'de, T: Facet<'static>>(input: &'de str) -> Result<T> {
     let partial = Partial::alloc::<T>()?;
     let de = Deserializer {
         parts: input.split(":"),

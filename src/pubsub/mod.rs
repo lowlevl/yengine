@@ -1,7 +1,10 @@
-use std::{hash::Hash, sync::Arc};
+use std::{
+    collections::HashMap,
+    hash::Hash,
+    sync::{Arc, RwLock},
+};
 
 use anyhow::Result;
-use dashmap::DashMap;
 use futures::{
     lock::Mutex,
     task::{self, AtomicWaker},
@@ -11,16 +14,17 @@ mod sub;
 pub use sub::Sub;
 
 pub trait PubSubable {
-    type Topic: Copy + Hash + Eq;
+    type Topic: Clone + Hash + Eq;
 
     fn topic(&self) -> Self::Topic;
 }
 
 struct Inner<I: PubSubable> {
-    wakers: DashMap<I::Topic, AtomicWaker>,
+    wakers: RwLock<HashMap<I::Topic, Arc<AtomicWaker>>>,
 
     signal: AtomicWaker,
     data: Mutex<Option<I>>,
+    // FIXME: Condvar
 }
 
 impl<I: PubSubable> Default for Inner<I> {
@@ -55,7 +59,9 @@ impl<I: PubSubable> PubSub<I> {
         if self
             .inner
             .wakers
-            .insert(topic, Default::default())
+            .write()
+            .unwrap()
+            .insert(topic.clone(), Default::default())
             .is_some()
         {
             panic!("category already subscribed, bailing");
@@ -65,8 +71,18 @@ impl<I: PubSubable> PubSub<I> {
     }
 
     pub async fn publish(&mut self, item: I) -> Result<(), I> {
-        if let Some(waker) = self.inner.wakers.get(&item.topic()) {
-            *self.inner.data.lock().await = Some(item);
+        let waker = self
+            .inner
+            .wakers
+            .read()
+            .unwrap()
+            .get(&item.topic())
+            .cloned();
+
+        if let Some(waker) = waker {
+            if self.inner.data.lock().await.replace(item).is_some() {
+                unreachable!("replaced a Some() value, aborting");
+            }
 
             futures::future::poll_fn({
                 let inner = self.inner.clone();
@@ -96,19 +112,9 @@ impl<I: PubSubable> PubSub<I> {
 
 impl<I: PubSubable> Drop for PubSub<I> {
     fn drop(&mut self) {
-        // NOTE: We collect here to remove reference to the DashMap
-        // which would deadlock on calls to `remove`.
-        for topic in self
-            .inner
-            .wakers
-            .iter()
-            .map(|task| *task.key())
-            .collect::<Vec<_>>()
-        {
-            if let Some((_, waker)) = self.inner.wakers.remove(&topic) {
-                // Wake all tasks, that will subsequently return `None`
-                waker.wake();
-            }
+        for (_, waker) in self.inner.wakers.write().unwrap().drain() {
+            // Wake all tasks, that will subsequently return `None`
+            waker.wake();
         }
     }
 }

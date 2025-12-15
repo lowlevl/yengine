@@ -4,10 +4,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs, clippy::unimplemented)]
 
-mod msg;
-mod pubsub;
-
 pub mod format;
+mod pubsub;
 
 mod engine;
 pub use engine::Engine;
