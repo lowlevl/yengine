@@ -36,11 +36,11 @@ impl PubSubable for Msg {
             Topic::UnwatchAck(msg.name)
         } else if let Ok(msg) = format::from_str::<SetLocalAck>(&self.0) {
             Topic::SetLocalAck(msg.name)
-        } else if let Ok(_) = format::from_str::<Message>(&self.0) {
+        } else if format::from_str::<Message>(&self.0).is_ok() {
             Topic::Message
         } else if let Ok(msg) = format::from_str::<MessageAck>(&self.0) {
             Topic::MessageAck(msg.id)
-        } else if let Ok(_) = format::from_str::<QuitAck>(&self.0) {
+        } else if format::from_str::<QuitAck>(&self.0).is_ok() {
             Topic::QuitAck
         } else {
             Topic::Other

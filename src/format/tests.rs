@@ -20,6 +20,25 @@ fn error_in() {
 }
 
 #[test]
+fn message() {
+    test::<Message>("%%>message:yengine.1.1:1095112795:engine.timer:");
+    test::<Message>("%%>message:yengine.1.2:1095112795:engine.timer:1234");
+    test::<Message>("%%>message:yengine.1.3:1095112795:engine.timer::time=1095112795");
+    test::<Message>(
+        "%%>message:yengine.1.4:1095112794:app.job::done=75%%:job=cleanup:path=/bin%Z/usr/bin",
+    );
+}
+
+#[test]
+fn message_ack() {
+    test::<MessageAck>("%%<message:234479208:false:engine.timer::time=1095112795");
+    test::<MessageAck>("%%<message:234479288:false:engine.timer::extra=true:time=1095112796");
+    test::<MessageAck>(
+        "%%<message:yengine.1.4:true:app.job:Restart required:path=/bin%Z/usr/bin%Z/usr/local/bin",
+    );
+}
+
+#[test]
 fn install() {
     test::<Install>("%%>install::engine.timer");
     test::<Install>("%%>install:50:engine.timer");

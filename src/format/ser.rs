@@ -1,4 +1,4 @@
-use facet::{Def, Facet, HasFields, Peek, PeekOption};
+use facet::{Def, Facet, HasFields, Peek, PeekMap, PeekOption};
 
 #[derive(Default)]
 struct Serializer {
@@ -22,6 +22,13 @@ impl Serializer {
         }
     }
 
+    fn serialize_map(&mut self, peek: PeekMap<'_, 'static>) {
+        for (k, v) in peek.iter() {
+            // FIXME: recursive serialization
+            self.parts.push(format!("{k}={v}"));
+        }
+    }
+
     fn serialize_value(&mut self, peek: Peek<'_, 'static>, has_default: bool) {
         if let Some(tag) = peek.shape().type_tag {
             self.serialize_tag(tag);
@@ -33,6 +40,8 @@ impl Serializer {
             }
         } else if let Ok(peek) = peek.into_option() {
             self.serialize_option(peek, has_default);
+        } else if let Ok(peek) = peek.into_map() {
+            self.serialize_map(peek);
         } else {
             match peek.shape().def {
                 Def::Scalar => self.serialize_scalar(peek),

@@ -8,7 +8,7 @@
 //! - **(<)**: _Engine_ to _Application_
 //! - **(~)**: _Bi_-directional
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[cfg(test)]
 mod tests;
@@ -53,8 +53,7 @@ pub struct Message {
     pub retvalue: String,
 
     /// Enumeration of the key-value pairs of the message.
-    #[facet(flatten)]
-    pub kv: HashMap<String, String>,
+    pub kv: BTreeMap<String, String>,
 }
 
 /// **(~)** Confirmation that the **message** has been processed properly or not.
@@ -74,8 +73,7 @@ pub struct MessageAck {
     pub retvalue: String,
 
     /// Enumeration of the key-value pairs of the message.
-    #[facet(flatten)]
-    pub kv: HashMap<String, String>,
+    pub kv: BTreeMap<String, String>,
 }
 
 /// **(>)** Requests the installing of a message **handler**.

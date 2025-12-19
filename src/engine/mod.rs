@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     io::{Stdin, Stdout},
     sync::atomic::{AtomicUsize, Ordering},
     time::SystemTime,
@@ -188,8 +188,8 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
         &self,
         name: impl Into<String>,
         retvalue: impl Into<String>,
-        kv: HashMap<String, String>,
-    ) -> Result<(bool, String, HashMap<String, String>)> {
+        kv: BTreeMap<String, String>,
+    ) -> Result<(bool, String, BTreeMap<String, String>)> {
         let id = self.id();
         let message = Message {
             id,

@@ -1,41 +1,20 @@
-use std::{iter::Peekable, str::Split};
+use std::collections::VecDeque;
 
 use facet::{Def, Facet, Partial, Type, UserType};
 
 use super::{Error, Result};
 
 struct Deserializer<'de> {
-    parts: Peekable<Split<'de, &'static str>>,
+    parts: VecDeque<&'de str>,
 }
 
 impl<'de> Deserializer<'de> {
     fn deserialize_tag(&mut self) -> Result<&str> {
-        self.parts.next().ok_or(Error::MissingTag)
+        self.parts.pop_front().ok_or(Error::MissingTag)
     }
 
-    // fn deserialize_map(&mut self, mut partial: Partial<'static>) -> Result<Partial<'static>> {
-    //     partial = partial.begin_custom_deserialization()?.begin_map()?;
-    //
-    //     for value in self.parts.by_ref() {
-    //         let Some((name, value)) = value.split_once('=') else {
-    //             return Err(Error::MisformatedMap);
-    //         };
-    //
-    //         // NOTE: may be a recursive deserialization of k,v too
-    //         partial = partial
-    //             .begin_key()?
-    //             .parse_from_str(name)?
-    //             .end()?
-    //             .begin_value()?
-    //             .parse_from_str(value)?
-    //             .end()?;
-    //     }
-    //
-    //     Ok(partial)
-    // }
-
     fn deserialize_scalar(&mut self, partial: Partial<'static>) -> Result<Partial<'static>> {
-        match self.parts.next() {
+        match self.parts.pop_front() {
             Some(value) => Ok(partial.parse_from_str(value)?),
             None => Err(Error::MissingValue),
         }
@@ -46,9 +25,9 @@ impl<'de> Deserializer<'de> {
         mut partial: Partial<'static>,
         has_default: bool,
     ) -> Result<Partial<'static>> {
-        match self.parts.peek() {
+        match self.parts.front() {
             Some(&"") => {
-                self.parts.next();
+                self.parts.pop_front();
 
                 Ok(partial.set_default()?)
             }
@@ -62,6 +41,35 @@ impl<'de> Deserializer<'de> {
         }
     }
 
+    fn deserialize_map(
+        &mut self,
+        mut partial: Partial<'static>,
+        has_default: bool,
+    ) -> Result<Partial<'static>> {
+        partial = partial.begin_map()?;
+
+        self.parts = self
+            .parts
+            .drain(..)
+            .map(|kv| kv.split_once('=').ok_or(Error::MisformatedMap))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flat_map(|(k, v)| [k, v])
+            .collect();
+
+        while self.parts.front().is_some() {
+            partial = partial.begin_key()?;
+            partial = self.deserialize_value(partial, has_default)?;
+            partial = partial.end()?;
+
+            partial = partial.begin_value()?;
+            partial = self.deserialize_value(partial, has_default)?;
+            partial = partial.end()?;
+        }
+
+        Ok(partial)
+    }
+
     fn deserialize_value(
         &mut self,
         mut partial: Partial<'static>,
@@ -73,7 +81,7 @@ impl<'de> Deserializer<'de> {
             return Err(Error::MismatchedTag);
         }
 
-        if self.parts.peek().is_none() && has_default {
+        if self.parts.front().is_none() && has_default {
             return Ok(partial.set_default()?);
         }
 
@@ -91,6 +99,7 @@ impl<'de> Deserializer<'de> {
             _ => match partial.shape().def {
                 Def::Scalar => self.deserialize_scalar(partial),
                 Def::Option(_) => self.deserialize_option(partial, has_default),
+                Def::Map(_) => self.deserialize_map(partial, has_default),
 
                 _ => panic!(
                     "unable to deserialize type `{}`",
@@ -101,7 +110,7 @@ impl<'de> Deserializer<'de> {
     }
 
     fn deserialize<T: facet::Facet<'static>>(mut self, partial: Partial<'static>) -> Result<T> {
-        self.deserialize_value(partial, false)?
+        self.deserialize_value(partial, Default::default())?
             .build()?
             .materialize()
             .map_err(Into::into)
@@ -112,7 +121,7 @@ impl<'de> Deserializer<'de> {
 pub fn from_str<T: Facet<'static>>(input: &str) -> Result<T> {
     let partial = Partial::alloc::<T>()?;
     let de = Deserializer {
-        parts: input.split(":").peekable(),
+        parts: input.split(":").collect(),
     };
 
     de.deserialize(partial)
