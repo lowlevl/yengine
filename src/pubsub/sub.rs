@@ -37,11 +37,13 @@ impl<I: PubSubable> Stream for Sub<I> {
             return task::Poll::Ready(None);
         }
 
-        let mut data = futures::ready!(self.inner.data.lock().poll_unpin(cx));
+        let mut mutex = std::pin::pin!(self.inner.data.lock());
+        let mut data = futures::ready!(mutex.poll_unpin(cx));
+
         match data.take() {
             // The topic matched ours, pop the item from the PubSub, and wakeup the publisher
             Some(item) if item.topic() == self.topic => {
-                self.inner.signal.wake();
+                self.inner.condvar.notify_one();
 
                 task::Poll::Ready(Some(item))
             }

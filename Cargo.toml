@@ -10,8 +10,8 @@ async-std = { version = "1.13.2", default-features = false, features = [
 futures = "0.3.31"
 futures_codec = "0.4.1"
 
-anyhow = "1.0.100"
-
 facet = { version = "0.32.2", features = ["reflect"] }
-thiserror = "2.0.17"
 tracing = "0.1.43"
+
+anyhow = "1.0.100"
+thiserror = "2.0.17"

@@ -11,8 +11,6 @@ use futures::{
 };
 use futures_codec::{FramedRead, FramedWrite, LinesCodec};
 
-use crate::format::ErrorIn;
-
 use super::{
     format::{
         self, Connect, Install, InstallAck, Message, MessageAck, Output, Quit, QuitAck, SetLocal,
@@ -20,6 +18,7 @@ use super::{
     },
     pubsub::PubSub,
 };
+use crate::format::ErrorIn;
 
 mod error;
 pub use error::{Error, Result};
@@ -32,7 +31,7 @@ pub struct Engine<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> {
     pid: u32,
     seq: AtomicUsize,
 
-    pubsub: Mutex<PubSub<Msg>>,
+    pubsub: PubSub<Msg>,
 
     rx: Mutex<FramedRead<I, LinesCodec>>,
     tx: Mutex<FramedWrite<O, LinesCodec>>,
@@ -64,23 +63,32 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn recv<T: Facet<'static>>(&self, topic: Topic) -> Result<T> {
-        let mut subscribed = self.pubsub.lock().await.subscribe(topic);
+    async fn wait<T: Facet<'static>>(&self, topic: Topic) -> Result<T> {
+        let mut subscribed = self.pubsub.subscribe(topic);
 
-        loop {
-            let Some(mut msg) = self.rx.lock().await.try_next().await? else {
-                break Err(Error::UnexpectedEof);
-            };
+        let (msg, _) = futures::try_join!(
+            async {
+                subscribed
+                    .next()
+                    .await
+                    .map(|item| format::from_str(&item.0))
+                    .ok_or(Error::UnexpectedEof)?
+                    .map_err(Error::from)
+            },
+            async {
+                let mut recvd = self
+                    .rx
+                    .lock()
+                    .await
+                    .try_next()
+                    .await?
+                    .ok_or(Error::UnexpectedEof)?;
+                recvd.pop(); // remove stray newline
 
-            msg.pop(); // remove stray newline
-
-            tracing::trace!("received: {msg}");
-
-            match self.pubsub.lock().await.publish(Msg(msg)).await {
-                Err(Msg(msg)) => {
+                if let Err(Msg(recvd)) = self.pubsub.publish(Msg(recvd)).await {
                     if let Ok(Message {
                         id, retvalue, kv, ..
-                    }) = format::from_str(&msg)
+                    }) = format::from_str(&recvd)
                     {
                         self.send(&MessageAck {
                             id,
@@ -90,25 +98,20 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
                             kv,
                         })
                         .await?
-                    } else if let Ok(ErrorIn { original }) = format::from_str(&msg) {
+                    } else if let Ok(ErrorIn { original }) = format::from_str(&recvd) {
                         tracing::error!("received an error from the engine: {original}");
 
                         // TODO: treat error case
                     } else {
-                        tracing::debug!("unhandled message, dropping: {msg}");
+                        tracing::debug!("unhandled message, dropping: {recvd}");
                     }
-                }
+                };
 
-                Ok(_) => {
-                    break subscribed
-                        .next()
-                        .await
-                        .map(|item| format::from_str(&item.0))
-                        .ok_or(Error::UnexpectedEof)?
-                        .map_err(Into::into);
-                }
+                Ok(())
             }
-        }
+        )?;
+
+        Ok(msg)
     }
 
     /// Request the engine to install a message handler with the provided `priority`.
@@ -126,7 +129,7 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
         self.send(&message).await?;
         let ack = self
-            .recv::<InstallAck>(Topic::InstallAck(message.name))
+            .wait::<InstallAck>(Topic::InstallAck(message.name))
             .await?;
 
         Ok(ack.success)
@@ -138,7 +141,7 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
         self.send(&message).await?;
         let ack = self
-            .recv::<UninstallAck>(Topic::UninstallAck(message.name))
+            .wait::<UninstallAck>(Topic::UninstallAck(message.name))
             .await?;
 
         Ok(ack.success)
@@ -149,7 +152,7 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
         let message = Watch { name: name.into() };
 
         self.send(&message).await?;
-        let ack = self.recv::<WatchAck>(Topic::WatchAck(message.name)).await?;
+        let ack = self.wait::<WatchAck>(Topic::WatchAck(message.name)).await?;
 
         Ok(ack.success)
     }
@@ -160,7 +163,7 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
         self.send(&message).await?;
         let ack = self
-            .recv::<UnwatchAck>(Topic::UnwatchAck(message.name))
+            .wait::<UnwatchAck>(Topic::UnwatchAck(message.name))
             .await?;
 
         Ok(ack.success)
@@ -179,7 +182,7 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
         self.send(&message).await?;
         let ack = self
-            .recv::<SetLocalAck>(Topic::SetLocalAck(message.name))
+            .wait::<SetLocalAck>(Topic::SetLocalAck(message.name))
             .await?;
 
         Ok(ack.success)
@@ -194,7 +197,7 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
         self.send(&message).await?;
         let ack = self
-            .recv::<SetLocalAck>(Topic::SetLocalAck(message.name))
+            .wait::<SetLocalAck>(Topic::SetLocalAck(message.name))
             .await?;
 
         Ok(ack.value)
@@ -227,7 +230,7 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
         self.send(&message).await?;
         let ack = self
-            .recv::<MessageAck>(Topic::MessageAck(message.id))
+            .wait::<MessageAck>(Topic::MessageAck(message.id))
             .await?;
 
         Ok((ack.processed, ack.retvalue, ack.kv))
@@ -236,8 +239,6 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
     /// Receive messages from teh telephony engine for processing.
     pub async fn messages(&self) -> impl TryStream<Ok = Message, Error = Error> {
         self.pubsub
-            .lock()
-            .await
             .subscribe(Topic::Message)
             .map(|Msg(msg)| format::from_str(&msg))
             .err_into()
@@ -269,7 +270,7 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
     /// Tell the engine we desire to stop handling messages.
     pub async fn quit(&self) -> Result<()> {
         self.send(&Quit).await?;
-        self.recv::<QuitAck>(Topic::QuitAck).await?;
+        self.wait::<QuitAck>(Topic::QuitAck).await?;
 
         Ok(())
     }

@@ -6,10 +6,8 @@ use std::{
 };
 
 use anyhow::Result;
-use futures::{
-    lock::Mutex,
-    task::{self, AtomicWaker},
-};
+use async_std::sync::{Condvar, Mutex};
+use futures::task::AtomicWaker;
 
 mod sub;
 pub use sub::Sub;
@@ -23,9 +21,8 @@ pub trait PubSubable {
 struct Inner<I: PubSubable> {
     wakers: RwLock<HashMap<I::Topic, Arc<AtomicWaker>>>,
 
-    signal: AtomicWaker,
     data: Mutex<Option<I>>,
-    // FIXME: Condvar
+    condvar: Condvar,
 }
 
 impl<I: PubSubable> Default for Inner<I> {
@@ -33,8 +30,8 @@ impl<I: PubSubable> Default for Inner<I> {
         Self {
             wakers: Default::default(),
 
-            signal: Default::default(),
             data: Default::default(),
+            condvar: Default::default(),
         }
     }
 }
@@ -69,35 +66,27 @@ impl<I: PubSubable> PubSub<I> {
         Sub::new(self.inner.clone(), topic)
     }
 
-    pub async fn publish(&mut self, item: I) -> Result<(), I> {
+    pub async fn publish(&self, item: I) -> Result<(), I> {
         let topic = item.topic();
 
         tracing::trace!("publishing {topic:?}");
 
         let waker = self.inner.wakers.read().unwrap().get(&topic).cloned();
         if let Some(waker) = waker {
-            if self.inner.data.lock().await.replace(item).is_some() {
-                unreachable!("replaced a Some() value, aborting");
-            }
+            let mut guard = self
+                .inner
+                .condvar
+                .wait_until(self.inner.data.lock().await, |data| data.is_none())
+                .await;
 
-            futures::future::poll_fn({
-                let inner = self.inner.clone();
-                let mut registered = false;
+            *guard = Some(item);
+            waker.wake();
 
-                move |cx| {
-                    if !registered {
-                        inner.signal.register(cx.waker());
-                        registered = true;
-
-                        waker.wake();
-
-                        task::Poll::Pending
-                    } else {
-                        task::Poll::Ready(())
-                    }
-                }
-            })
-            .await;
+            self.inner
+                .condvar
+                .wait_until(guard, |data| data.is_none())
+                .await;
+            self.inner.condvar.notify_one(); // FIXME: check if this is necessary
 
             Ok(())
         } else {
