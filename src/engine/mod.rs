@@ -11,6 +11,8 @@ use futures::{
 };
 use futures_codec::{FramedRead, FramedWrite, LinesCodec};
 
+use crate::format::ErrorIn;
+
 use super::{
     format::{
         self, Connect, Install, InstallAck, Message, MessageAck, Output, Quit, QuitAck, SetLocal,
@@ -65,15 +67,31 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
         let mut subscribed = self.pubsub.lock().await.subscribe(topic);
 
         loop {
-            let Some(item) = self.rx.lock().await.try_next().await? else {
+            let Some(msg) = self.rx.lock().await.try_next().await? else {
                 break Err(Error::UnexpectedEof);
             };
 
-            match self.pubsub.lock().await.publish(Msg(item)).await {
-                Err(Msg(item)) => {
-                    tracing::warn!("unhandled message: {item}");
+            match self.pubsub.lock().await.publish(Msg(msg)).await {
+                Err(Msg(msg)) => {
+                    if let Ok(Message {
+                        id, retvalue, kv, ..
+                    }) = format::from_str(&msg)
+                    {
+                        self.send(&MessageAck {
+                            id,
+                            processed: false,
+                            name: None,
+                            retvalue,
+                            kv,
+                        })
+                        .await?
+                    } else if let Ok(ErrorIn { original }) = format::from_str(&msg) {
+                        tracing::error!("received an error from the engine: {original}");
 
-                    // TODO: treat default case
+                        // TODO: treat error case
+                    } else {
+                        tracing::warn!("unhandled message, dropping: {msg}");
+                    }
                 }
 
                 Ok(_) => {
@@ -212,7 +230,12 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
     /// Receive messages from teh telephony engine for processing.
     pub async fn messages(&self) -> impl TryStream<Ok = Message, Error = Error> {
-        futures::stream::empty()
+        self.pubsub
+            .lock()
+            .await
+            .subscribe(Topic::Message)
+            .map(|Msg(msg)| format::from_str(&msg))
+            .err_into()
     }
 
     /// Send a [`Connect`] message to the engine for

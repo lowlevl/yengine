@@ -51,10 +51,6 @@ impl<I: PubSubable> Default for PubSub<I> {
 }
 
 impl<I: PubSubable> PubSub<I> {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn subscribe(&self, topic: I::Topic) -> Sub<I> {
         if self
             .inner
