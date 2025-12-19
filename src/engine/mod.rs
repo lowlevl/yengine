@@ -2,12 +2,14 @@ use std::{
     collections::BTreeMap,
     io::{Stdin, Stdout},
     sync::atomic::{AtomicUsize, Ordering},
+    task::Poll,
     time::SystemTime,
 };
 
+use async_std::sync::Mutex;
 use facet::Facet;
 use futures::{
-    AsyncRead, AsyncWrite, SinkExt, StreamExt, TryStream, TryStreamExt, io::AllowStdIo, lock::Mutex,
+    AsyncRead, AsyncWrite, FutureExt, SinkExt, StreamExt, TryStream, TryStreamExt, io::AllowStdIo,
 };
 use futures_codec::{FramedRead, FramedWrite, LinesCodec};
 
@@ -62,6 +64,41 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
         self.tx.lock().await.send(item).await.map_err(Into::into)
     }
 
+    async fn recv(&self) -> Result<()> {
+        let mut recvd = self
+            .rx
+            .lock()
+            .await
+            .try_next()
+            .await?
+            .ok_or(Error::UnexpectedEof)?;
+        recvd.pop(); // remove stray newline
+
+        if let Err(Msg(recvd)) = self.pubsub.publish(Msg(recvd)).await {
+            if let Ok(Message {
+                id, retvalue, kv, ..
+            }) = format::from_str(&recvd)
+            {
+                self.send(&MessageAck {
+                    id,
+                    processed: false,
+                    name: None,
+                    retvalue,
+                    kv,
+                })
+                .await?
+            } else if let Ok(ErrorIn { original }) = format::from_str(&recvd) {
+                tracing::error!("received an error from the engine: {original}");
+
+                // TODO: treat error case
+            } else {
+                tracing::debug!("unhandled message, dropping: {recvd}");
+            }
+        };
+
+        Ok(())
+    }
+
     #[tracing::instrument(skip(self))]
     async fn wait<T: Facet<'static>>(&self, topic: Topic) -> Result<T> {
         let mut subscribed = self.pubsub.subscribe(topic);
@@ -75,40 +112,7 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
                     .ok_or(Error::UnexpectedEof)?
                     .map_err(Error::from)
             },
-            async {
-                let mut recvd = self
-                    .rx
-                    .lock()
-                    .await
-                    .try_next()
-                    .await?
-                    .ok_or(Error::UnexpectedEof)?;
-                recvd.pop(); // remove stray newline
-
-                if let Err(Msg(recvd)) = self.pubsub.publish(Msg(recvd)).await {
-                    if let Ok(Message {
-                        id, retvalue, kv, ..
-                    }) = format::from_str(&recvd)
-                    {
-                        self.send(&MessageAck {
-                            id,
-                            processed: false,
-                            name: None,
-                            retvalue,
-                            kv,
-                        })
-                        .await?
-                    } else if let Ok(ErrorIn { original }) = format::from_str(&recvd) {
-                        tracing::error!("received an error from the engine: {original}");
-
-                        // TODO: treat error case
-                    } else {
-                        tracing::debug!("unhandled message, dropping: {recvd}");
-                    }
-                };
-
-                Ok(())
-            }
+            self.recv()
         )?;
 
         Ok(msg)
@@ -238,10 +242,19 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
     /// Receive messages from teh telephony engine for processing.
     pub async fn messages(&self) -> impl TryStream<Ok = Message, Error = Error> {
-        self.pubsub
-            .subscribe(Topic::Message)
-            .map(|Msg(msg)| format::from_str(&msg))
-            .err_into()
+        let mut subscribed = self.pubsub.subscribe(Topic::Message);
+        let mut recv = self.recv().boxed_local();
+
+        futures::stream::poll_fn(move |cx| match recv.poll_unpin(cx)? {
+            Poll::Pending => Poll::Ready(futures::ready!(subscribed.poll_next_unpin(cx)).map(Ok)),
+            Poll::Ready(()) => {
+                recv = self.recv().boxed_local();
+
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+        })
+        .and_then(|Msg(msg)| futures::future::ready(format::from_str(&msg).map_err(Into::into)))
     }
 
     /// Send a [`Connect`] message to the engine for
