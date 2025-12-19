@@ -10,6 +10,9 @@
 
 use std::collections::HashMap;
 
+#[cfg(test)]
+mod tests;
+
 mod error;
 pub use error::{Error, Result};
 
@@ -65,7 +68,7 @@ pub struct MessageAck {
     pub processed: bool,
 
     /// New name of the message, if empty keep unchanged.
-    pub name: String,
+    pub name: Option<String>,
 
     /// New textual return value of the message.
     pub retvalue: String,
@@ -88,7 +91,7 @@ pub struct Install {
     /// Filter for the installed handler;
     /// - name of a variable the handler will filter,
     /// - matching value for the filtered variable.
-    #[facet(flatten)]
+    #[facet(default)]
     pub filter: Option<(String, Option<String>)>,
 }
 
@@ -261,11 +264,9 @@ pub struct Connect {
     /// Role of this connection: `global`, `channel`, `play`, `record` or `playrec`.
     pub role: String,
 
-    /// Channel id to connect this socket to.
-    pub id: Option<String>,
-
-    /// Type of data channel, assuming `audio` if `None`.
-    pub type_: Option<String>,
+    /// Channel to connect this socket to, with it's `id` and optional `type`, assuming `audio` if `None`.
+    #[facet(default)]
+    pub channel: Option<(String, Option<String>)>,
 }
 
 /// **(>)** The [`Quit`] message is used to tell the engine

@@ -220,13 +220,11 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
     pub async fn connect(
         &self,
         role: impl Into<String>,
-        id: impl Into<Option<String>>,
-        type_: impl Into<Option<String>>,
+        channel: impl Into<Option<(String, Option<String>)>>,
     ) -> Result<()> {
         let message = Connect {
             role: role.into(),
-            id: id.into(),
-            type_: type_.into(),
+            channel: channel.into(),
         };
 
         self.send(&message).await
