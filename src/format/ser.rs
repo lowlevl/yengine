@@ -11,7 +11,8 @@ impl Serializer {
     }
 
     fn serialize_scalar(&mut self, peek: Peek<'_, 'static>) {
-        self.parts.push(peek.to_string());
+        self.parts
+            .push(super::upcode::encode(&peek.to_string()).into_owned());
     }
 
     fn serialize_option(&mut self, peek: PeekOption<'_, 'static>, has_default: bool) {
@@ -24,7 +25,12 @@ impl Serializer {
 
     fn serialize_map(&mut self, peek: PeekMap<'_, 'static>) {
         for (k, v) in peek.iter() {
-            // FIXME: recursive serialization
+            self.serialize_value(k, false);
+            let k = self.parts.pop().expect("key not serialized");
+
+            self.serialize_value(v, false);
+            let v = self.parts.pop().expect("value not serialized");
+
             self.parts.push(format!("{k}={v}"));
         }
     }

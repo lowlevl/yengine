@@ -15,7 +15,7 @@ impl<'de> Deserializer<'de> {
 
     fn deserialize_scalar(&mut self, partial: Partial<'static>) -> Result<Partial<'static>> {
         match self.parts.pop_front() {
-            Some(value) => Ok(partial.parse_from_str(value)?),
+            Some(value) => Ok(partial.parse_from_str(&super::upcode::decode(value)?)?),
             None => Err(Error::MissingValue),
         }
     }

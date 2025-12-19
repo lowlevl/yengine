@@ -10,6 +10,10 @@ pub enum Error {
     #[error(transparent)]
     Reflect(#[from] facet::ReflectError),
 
+    /// The string was misencoded.
+    #[error("unable to decode string: {0}")]
+    Encoding(#[from] crate::format::upcode::DecodeError),
+
     /// The message didn't include a tag.
     #[error("no message tag found")]
     MissingTag,

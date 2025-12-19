@@ -1,16 +1,19 @@
+use std::fmt::Debug;
+
 use facet::Facet;
 
 use super::*;
 
-fn test<T: Facet<'static>>(input: &str) {
+fn test<T: Facet<'static> + Debug>(input: &str) {
     let deserialized = from_str::<T>(input).unwrap_or_else(|err| {
         panic!(
             "can't deserialize `{}` from `{input}`: {err}",
             T::SHAPE.type_identifier
         )
     });
-    let serialized = to_string(&deserialized);
+    eprintln!("{deserialized:?}");
 
+    let serialized = to_string(&deserialized);
     assert_eq!(input, serialized, "for {}", T::SHAPE.type_identifier)
 }
 
