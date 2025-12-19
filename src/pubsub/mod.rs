@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::Debug,
     hash::Hash,
     sync::{Arc, RwLock},
 };
@@ -14,7 +15,7 @@ mod sub;
 pub use sub::Sub;
 
 pub trait PubSubable {
-    type Topic: Clone + Hash + Eq;
+    type Topic: Debug + Clone + Hash + Eq;
 
     fn topic(&self) -> Self::Topic;
 }
@@ -63,18 +64,17 @@ impl<I: PubSubable> PubSub<I> {
             panic!("category already subscribed, bailing");
         }
 
+        tracing::trace!("subscribing {topic:?}");
+
         Sub::new(self.inner.clone(), topic)
     }
 
     pub async fn publish(&mut self, item: I) -> Result<(), I> {
-        let waker = self
-            .inner
-            .wakers
-            .read()
-            .unwrap()
-            .get(&item.topic())
-            .cloned();
+        let topic = item.topic();
 
+        tracing::trace!("publishing {topic:?}");
+
+        let waker = self.inner.wakers.read().unwrap().get(&topic).cloned();
         if let Some(waker) = waker {
             if self.inner.data.lock().await.replace(item).is_some() {
                 unreachable!("replaced a Some() value, aborting");

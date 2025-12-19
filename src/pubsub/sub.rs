@@ -17,6 +17,8 @@ impl<I: PubSubable> Sub<I> {
 
 impl<I: PubSubable> Drop for Sub<I> {
     fn drop(&mut self) {
+        tracing::trace!("unsubscribing {:?}", self.topic);
+
         self.inner.wakers.write().unwrap().remove(&self.topic);
     }
 }

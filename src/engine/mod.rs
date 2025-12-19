@@ -63,13 +63,18 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
         self.tx.lock().await.send(item).await.map_err(Into::into)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn recv<T: Facet<'static>>(&self, topic: Topic) -> Result<T> {
         let mut subscribed = self.pubsub.lock().await.subscribe(topic);
 
         loop {
-            let Some(msg) = self.rx.lock().await.try_next().await? else {
+            let Some(mut msg) = self.rx.lock().await.try_next().await? else {
                 break Err(Error::UnexpectedEof);
             };
+
+            msg.pop(); // remove stray newline
+
+            tracing::trace!("received: {msg}");
 
             match self.pubsub.lock().await.publish(Msg(msg)).await {
                 Err(Msg(msg)) => {
@@ -90,7 +95,7 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
                         // TODO: treat error case
                     } else {
-                        tracing::warn!("unhandled message, dropping: {msg}");
+                        tracing::debug!("unhandled message, dropping: {msg}");
                     }
                 }
 
