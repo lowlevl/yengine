@@ -51,7 +51,7 @@ impl Engine<AllowStdIo<Stdin>, AllowStdIo<Stdout>> {
     }
 }
 
-impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
+impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
     async fn send<T: Facet<'static>>(&self, message: &T) -> Result<()> {
         let item = format::to_string(message);
 
@@ -101,7 +101,7 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
                 }
             }
         })
-        .boxed_local()
+        .boxed() // FIXME: maybe remove this `Box`
     }
 
     /// Request the engine to install a message handler with the provided `priority`.
@@ -293,6 +293,8 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
             .try_next()
             .await?
             .ok_or(Error::UnexpectedEof)?;
+
+        self.rx.unsubscribe_all();
 
         Ok(())
     }

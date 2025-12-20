@@ -52,13 +52,17 @@ impl<S: TryStream, T: Topic> Subscriber<S, T> {
 
         Sub::new(self.inner.clone(), topic)
     }
-}
 
-impl<S: TryStream, T: Topic> Drop for Subscriber<S, T> {
-    fn drop(&mut self) {
+    pub fn unsubscribe_all(&self) {
         for (_, waker) in self.inner.wakers.write().unwrap().drain() {
             // Wake all tasks, that will subsequently return `None`
             waker.wake();
         }
+    }
+}
+
+impl<S: TryStream, T: Topic> Drop for Subscriber<S, T> {
+    fn drop(&mut self) {
+        self.unsubscribe_all();
     }
 }
