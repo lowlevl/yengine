@@ -3,7 +3,7 @@ use crate::{
         self, InstallAck, Message, MessageAck, QuitAck, SetLocalAck, UninstallAck, UnwatchAck,
         WatchAck,
     },
-    pubsub::PubSubable,
+    subable::Subable,
 };
 
 pub struct Msg(pub String);
@@ -22,7 +22,7 @@ pub enum Topic {
     Other,
 }
 
-impl PubSubable for Msg {
+impl Subable for Msg {
     type Topic = Topic;
 
     fn topic(&self) -> Self::Topic {

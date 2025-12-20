@@ -4,14 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-async-std = { version = "1.13.2", default-features = false, features = [
-  "unstable",
-] }
 futures = "0.3.31"
 futures_codec = "0.4.1"
 
 facet = { version = "0.32.2", features = ["reflect"] }
 tracing = "0.1.43"
 
+bytes = "0.5.6"
 anyhow = "1.0.100"
 thiserror = "2.0.17"

@@ -2,25 +2,24 @@ use std::{
     collections::BTreeMap,
     io::{Stdin, Stdout},
     sync::atomic::{AtomicUsize, Ordering},
-    task::Poll,
     time::SystemTime,
 };
 
-use async_std::sync::Mutex;
+use bytes::{Buf, BufMut};
 use facet::Facet;
 use futures::{
-    AsyncRead, AsyncWrite, FutureExt, SinkExt, StreamExt, TryStream, TryStreamExt, io::AllowStdIo,
+    AsyncRead, AsyncWrite, SinkExt, StreamExt, TryStream, TryStreamExt, io::AllowStdIo, lock::Mutex,
 };
-use futures_codec::{FramedRead, FramedWrite, LinesCodec};
+use futures_codec::{Decoder, Encoder, FramedRead, FramedWrite};
 
 use super::{
     format::{
         self, Connect, Install, InstallAck, Message, MessageAck, Output, Quit, QuitAck, SetLocal,
         SetLocalAck, Uninstall, UninstallAck, Unwatch, UnwatchAck, Watch, WatchAck,
     },
-    pubsub::PubSub,
+    subable::Subscriber,
 };
-use crate::format::ErrorIn;
+use crate::{format::ErrorIn, subable::Subed};
 
 mod error;
 pub use error::{Error, Result};
@@ -28,30 +27,67 @@ pub use error::{Error, Result};
 mod msg;
 use msg::{Msg, Topic};
 
+struct Codec;
+
+impl Encoder for Codec {
+    type Item = Msg;
+    type Error = Error;
+
+    fn encode(
+        &mut self,
+        item: Self::Item,
+        dst: &mut futures_codec::BytesMut,
+    ) -> Result<(), Self::Error> {
+        let bytes = item.0.as_bytes();
+
+        dst.reserve(bytes.len() + 1);
+        dst.put(bytes);
+        dst.put_u8(b'\n');
+
+        Ok(())
+    }
+}
+
+impl Decoder for Codec {
+    type Item = Msg;
+    type Error = Error;
+
+    fn decode(
+        &mut self,
+        src: &mut futures_codec::BytesMut,
+    ) -> Result<Option<Self::Item>, Self::Error> {
+        match src.iter().position(|ch| *ch == b'\n') {
+            Some(pos) => {
+                let buf = src.split_to(pos);
+                src.advance(1);
+
+                Ok(Some(Msg(String::from_utf8_lossy(&buf).into_owned())))
+            }
+            None => Ok(None),
+        }
+    }
+}
+
 /// The main connector to the Yate Telephone Engine.
 pub struct Engine<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> {
     pid: u32,
     seq: AtomicUsize,
 
-    pubsub: PubSub<Msg>,
-
-    rx: Mutex<FramedRead<I, LinesCodec>>,
-    tx: Mutex<FramedWrite<O, LinesCodec>>,
+    rx: Subscriber<FramedRead<I, Codec>>,
+    tx: Mutex<FramedWrite<O, Codec>>,
 }
 
 impl Engine<AllowStdIo<Stdin>, AllowStdIo<Stdout>> {
     /// Initialize a connection to the engine via standard I/O.
     pub fn stdio() -> Self {
-        let rx = FramedRead::new(AllowStdIo::new(std::io::stdin()), LinesCodec);
-        let tx = FramedWrite::new(AllowStdIo::new(std::io::stdout()), LinesCodec);
+        let rx = FramedRead::new(AllowStdIo::new(std::io::stdin()), Codec);
+        let tx = FramedWrite::new(AllowStdIo::new(std::io::stdout()), Codec);
 
         Self {
             pid: std::process::id(),
             seq: Default::default(),
 
-            pubsub: Default::default(),
-
-            rx: rx.into(),
+            rx: Subscriber::new(rx),
             tx: tx.into(),
         }
     }
@@ -61,61 +97,52 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
     async fn send<T: Facet<'static>>(&self, message: &T) -> Result<()> {
         let item = format::to_string(message);
 
-        self.tx.lock().await.send(item).await.map_err(Into::into)
+        self.tx.lock().await.send(Msg(item)).await
     }
 
-    async fn recv(&self) -> Result<()> {
-        let mut recvd = self
-            .rx
-            .lock()
+    async fn default_response(&self, recvd: &str) -> Result<()> {
+        if let Ok(Message {
+            id, retvalue, kv, ..
+        }) = format::from_str(recvd)
+        {
+            self.send(&MessageAck {
+                id,
+                processed: false,
+                name: None,
+                retvalue,
+                kv,
+            })
             .await
-            .try_next()
-            .await?
-            .ok_or(Error::UnexpectedEof)?;
-        recvd.pop(); // remove stray newline
+        } else if let Ok(ErrorIn { original }) = format::from_str(recvd) {
+            tracing::error!("received an error from the engine: {original}");
 
-        if let Err(Msg(recvd)) = self.pubsub.publish(Msg(recvd)).await {
-            if let Ok(Message {
-                id, retvalue, kv, ..
-            }) = format::from_str(&recvd)
-            {
-                self.send(&MessageAck {
-                    id,
-                    processed: false,
-                    name: None,
-                    retvalue,
-                    kv,
-                })
-                .await?
-            } else if let Ok(ErrorIn { original }) = format::from_str(&recvd) {
-                tracing::error!("received an error from the engine: {original}");
+            // TODO: treat error case
 
-                // TODO: treat error case
-            } else {
-                tracing::debug!("unhandled message, dropping: {recvd}");
-            }
-        };
+            Ok(())
+        } else {
+            tracing::debug!("unhandled message, dropping: {recvd}");
 
-        Ok(())
+            Ok(())
+        }
     }
 
     #[tracing::instrument(skip(self))]
-    async fn wait<T: Facet<'static>>(&self, topic: Topic) -> Result<T> {
-        let mut subscribed = self.pubsub.subscribe(topic);
+    fn subscribe<T: Facet<'static>>(&self, topic: Topic) -> impl TryStream<Ok = T, Error = Error> {
+        let sub = self.rx.subscribe(topic);
 
-        let (msg, _) = futures::try_join!(
-            async {
-                subscribed
-                    .next()
-                    .await
-                    .map(|item| format::from_str(&item.0))
-                    .ok_or(Error::UnexpectedEof)?
-                    .map_err(Error::from)
-            },
-            self.recv()
-        )?;
+        futures::stream::try_unfold(sub, async |mut sub| {
+            loop {
+                let Some(recvd) = sub.try_next().await? else {
+                    break Ok(None);
+                };
 
-        Ok(msg)
+                match recvd {
+                    Subed::Match(recvd) => break Ok(Some((format::from_str(&recvd.0)?, sub))),
+                    Subed::Default(recvd) => self.default_response(&recvd.0).await?,
+                }
+            }
+        })
+        .boxed_local()
     }
 
     /// Request the engine to install a message handler with the provided `priority`.
@@ -133,8 +160,10 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
         self.send(&message).await?;
         let ack = self
-            .wait::<InstallAck>(Topic::InstallAck(message.name))
-            .await?;
+            .subscribe::<InstallAck>(Topic::InstallAck(message.name))
+            .try_next()
+            .await?
+            .ok_or(Error::UnexpectedEof)?;
 
         Ok(ack.success)
     }
@@ -145,8 +174,10 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
         self.send(&message).await?;
         let ack = self
-            .wait::<UninstallAck>(Topic::UninstallAck(message.name))
-            .await?;
+            .subscribe::<UninstallAck>(Topic::UninstallAck(message.name))
+            .try_next()
+            .await?
+            .ok_or(Error::UnexpectedEof)?;
 
         Ok(ack.success)
     }
@@ -156,7 +187,11 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
         let message = Watch { name: name.into() };
 
         self.send(&message).await?;
-        let ack = self.wait::<WatchAck>(Topic::WatchAck(message.name)).await?;
+        let ack = self
+            .subscribe::<WatchAck>(Topic::WatchAck(message.name))
+            .try_next()
+            .await?
+            .ok_or(Error::UnexpectedEof)?;
 
         Ok(ack.success)
     }
@@ -167,8 +202,10 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
         self.send(&message).await?;
         let ack = self
-            .wait::<UnwatchAck>(Topic::UnwatchAck(message.name))
-            .await?;
+            .subscribe::<UnwatchAck>(Topic::UnwatchAck(message.name))
+            .try_next()
+            .await?
+            .ok_or(Error::UnexpectedEof)?;
 
         Ok(ack.success)
     }
@@ -186,8 +223,10 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
         self.send(&message).await?;
         let ack = self
-            .wait::<SetLocalAck>(Topic::SetLocalAck(message.name))
-            .await?;
+            .subscribe::<SetLocalAck>(Topic::SetLocalAck(message.name))
+            .try_next()
+            .await?
+            .ok_or(Error::UnexpectedEof)?;
 
         Ok(ack.success)
     }
@@ -201,8 +240,10 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
         self.send(&message).await?;
         let ack = self
-            .wait::<SetLocalAck>(Topic::SetLocalAck(message.name))
-            .await?;
+            .subscribe::<SetLocalAck>(Topic::SetLocalAck(message.name))
+            .try_next()
+            .await?
+            .ok_or(Error::UnexpectedEof)?;
 
         Ok(ack.value)
     }
@@ -234,27 +275,17 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
         self.send(&message).await?;
         let ack = self
-            .wait::<MessageAck>(Topic::MessageAck(message.id))
-            .await?;
+            .subscribe::<MessageAck>(Topic::MessageAck(message.id))
+            .try_next()
+            .await?
+            .ok_or(Error::UnexpectedEof)?;
 
         Ok((ack.processed, ack.retvalue, ack.kv))
     }
 
     /// Receive messages from teh telephony engine for processing.
-    pub async fn messages(&self) -> impl TryStream<Ok = Message, Error = Error> {
-        let mut subscribed = self.pubsub.subscribe(Topic::Message);
-        let mut recv = self.recv().boxed_local();
-
-        futures::stream::poll_fn(move |cx| match recv.poll_unpin(cx)? {
-            Poll::Pending => Poll::Ready(futures::ready!(subscribed.poll_next_unpin(cx)).map(Ok)),
-            Poll::Ready(()) => {
-                recv = self.recv().boxed_local();
-
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-        })
-        .and_then(|Msg(msg)| futures::future::ready(format::from_str(&msg).map_err(Into::into)))
+    pub fn messages(&self) -> impl TryStream<Ok = Message, Error = Error> {
+        self.subscribe(Topic::Message)
     }
 
     /// Send a [`Connect`] message to the engine for
@@ -283,7 +314,10 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
     /// Tell the engine we desire to stop handling messages.
     pub async fn quit(&self) -> Result<()> {
         self.send(&Quit).await?;
-        self.wait::<QuitAck>(Topic::QuitAck).await?;
+        self.subscribe::<QuitAck>(Topic::QuitAck)
+            .try_next()
+            .await?
+            .ok_or(Error::UnexpectedEof)?;
 
         Ok(())
     }
