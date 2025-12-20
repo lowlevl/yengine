@@ -26,6 +26,9 @@ pub use error::{Error, Result};
 mod topic;
 use topic::Topic;
 
+mod req;
+use req::Req;
+
 /// The main connector to the Yate Telephone Engine.
 pub struct Engine<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> {
     rx: Subscriber<Lines<BufReader<I>>, Topic>,
@@ -240,8 +243,24 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
     }
 
     /// Receive messages from teh telephony engine for processing.
-    pub fn messages(&self) -> impl TryStream<Ok = Message, Error = Error> {
-        self.subscribe(Topic::Message)
+    pub fn messages(&self) -> impl TryStream<Ok = Req, Error = Error> {
+        self.subscribe(Topic::Message).map_ok(Req::new)
+    }
+
+    /// Acknowledge the message from the engine,
+    /// letting it forward it to the next handler if `!processed`.
+    pub async fn ack(&self, req: Req, processed: bool) -> Result<()> {
+        let original = req.into_inner();
+
+        let message = MessageAck {
+            id: original.id,
+            processed,
+            name: Some(original.name),
+            retvalue: original.retvalue,
+            kv: original.kv,
+        };
+
+        self.send(&message).await
     }
 
     /// Send a [`Connect`] message to the engine for
