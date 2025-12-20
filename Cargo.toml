@@ -1,7 +1,21 @@
 [package]
 name = "yengine"
-version = "0.1.0"
+version = "0.0.0"
 edition = "2024"
+keywords = ["yate", "extmodule", "telephony"]
+description = "Communication library for the Yate Engine external module protocol."
+documentation = "https://docs.rs/yengine"
+repository = "https://github.com/lowlevl/yengine"
+license = "LGPL-3.0"
+readme = "README.md"
+
+[package.metadata.docs.rs]
+
+# Whether to pass `--all-features` to Cargo (default: false)
+all-features = true
+
+# Enable unstable features in the documentation
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 futures = "0.3.31"
