@@ -3,10 +3,8 @@ use crate::{
         self, InstallAck, Message, MessageAck, QuitAck, SetLocalAck, UninstallAck, UnwatchAck,
         WatchAck,
     },
-    subable::Subable,
+    subable,
 };
-
-pub struct Msg(pub String);
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum Topic {
@@ -22,25 +20,25 @@ pub enum Topic {
     Other,
 }
 
-impl Subable for Msg {
-    type Topic = Topic;
+impl subable::Topic for Topic {
+    type From = String;
 
-    fn topic(&self) -> Self::Topic {
-        if let Ok(msg) = format::from_str::<InstallAck>(&self.0) {
+    fn topic(input: &Self::From) -> Self {
+        if let Ok(msg) = format::from_str::<InstallAck>(input) {
             Topic::InstallAck(msg.name)
-        } else if let Ok(msg) = format::from_str::<UninstallAck>(&self.0) {
+        } else if let Ok(msg) = format::from_str::<UninstallAck>(input) {
             Topic::UninstallAck(msg.name)
-        } else if let Ok(msg) = format::from_str::<WatchAck>(&self.0) {
+        } else if let Ok(msg) = format::from_str::<WatchAck>(input) {
             Topic::WatchAck(msg.name)
-        } else if let Ok(msg) = format::from_str::<UnwatchAck>(&self.0) {
+        } else if let Ok(msg) = format::from_str::<UnwatchAck>(input) {
             Topic::UnwatchAck(msg.name)
-        } else if let Ok(msg) = format::from_str::<SetLocalAck>(&self.0) {
+        } else if let Ok(msg) = format::from_str::<SetLocalAck>(input) {
             Topic::SetLocalAck(msg.name)
-        } else if format::from_str::<Message>(&self.0).is_ok() {
+        } else if format::from_str::<Message>(input).is_ok() {
             Topic::Message
-        } else if let Ok(msg) = format::from_str::<MessageAck>(&self.0) {
+        } else if let Ok(msg) = format::from_str::<MessageAck>(input) {
             Topic::MessageAck(msg.id)
-        } else if format::from_str::<QuitAck>(&self.0).is_ok() {
+        } else if format::from_str::<QuitAck>(input).is_ok() {
             Topic::QuitAck
         } else {
             Topic::Other

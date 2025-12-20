@@ -2,34 +2,25 @@ use std::sync::Arc;
 
 use futures::{FutureExt, Stream, TryStream, task};
 
-use super::{Inner, Subable};
+use super::{Inner, Topic};
 
-pub enum Subed<T> {
-    Match(T),
-    Default(T),
+pub enum Subed<I> {
+    Yes(I),
+    No(I),
 }
 
-pub struct Sub<S: TryStream>
-where
-    S::Ok: Subable,
-{
-    inner: Arc<Inner<S>>,
-    topic: <S::Ok as Subable>::Topic,
+pub struct Sub<S: TryStream, T: Topic> {
+    inner: Arc<Inner<S, T>>,
+    topic: T,
 }
 
-impl<S: TryStream> Sub<S>
-where
-    S::Ok: Subable,
-{
-    pub(super) fn new(inner: Arc<Inner<S>>, topic: <S::Ok as Subable>::Topic) -> Self {
+impl<S: TryStream, T: Topic> Sub<S, T> {
+    pub(super) fn new(inner: Arc<Inner<S, T>>, topic: T) -> Self {
         Self { inner, topic }
     }
 }
 
-impl<S: TryStream> Drop for Sub<S>
-where
-    S::Ok: Subable,
-{
+impl<S: TryStream, T: Topic> Drop for Sub<S, T> {
     fn drop(&mut self) {
         tracing::trace!("unsubscribing {:?}", self.topic);
 
@@ -37,9 +28,8 @@ where
     }
 }
 
-impl<S: TryStream + Stream<Item = Result<S::Ok, S::Error>> + Unpin> Stream for Sub<S>
-where
-    S::Ok: Subable,
+impl<S: TryStream + Stream<Item = Result<S::Ok, S::Error>> + Unpin, T: Topic<From = S::Ok>> Stream
+    for Sub<S, T>
 {
     type Item = Result<Subed<S::Ok>, S::Error>;
 
@@ -60,7 +50,7 @@ where
 
         match futures::ready!(stream.as_mut().poll_peek(cx)) {
             Some(Ok(item)) => {
-                let topic = item.topic();
+                let topic = T::topic(item);
                 let wakers = self.inner.wakers.read().unwrap();
 
                 if let Some(waker) = wakers.get(&topic)
@@ -72,15 +62,15 @@ where
                     task::Poll::Pending
                 } else if topic == self.topic {
                     // The item is for us, pop it as `Match`
-                    stream.as_mut().poll_next(cx).map_ok(Subed::Match)
+                    stream.as_mut().poll_next(cx).map_ok(Subed::Yes)
                 } else {
                     // The item is unhandled, pop it as `Default`
-                    stream.as_mut().poll_next(cx).map_ok(Subed::Default)
+                    stream.as_mut().poll_next(cx).map_ok(Subed::No)
                 }
             }
 
             // The stream errored, pop it from the stream
-            Some(_) => stream.as_mut().poll_next(cx).map_ok(Subed::Default),
+            Some(_) => stream.as_mut().poll_next(cx).map_ok(Subed::No),
 
             // The stream ended, return `None`
             None => task::Poll::Ready(None),

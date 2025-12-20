@@ -10,31 +10,22 @@ use futures::{StreamExt, TryStream, lock::Mutex, stream::Peekable, task::AtomicW
 mod sub;
 pub use sub::{Sub, Subed};
 
-pub trait Subable {
-    type Topic: Debug + Clone + Hash + Eq;
+pub trait Topic: Debug + Clone + Hash + Eq {
+    type From;
 
-    fn topic(&self) -> Self::Topic;
+    fn topic(input: &Self::From) -> Self;
 }
 
-struct Inner<S: TryStream>
-where
-    S::Ok: Subable,
-{
-    wakers: RwLock<HashMap<<S::Ok as Subable>::Topic, Arc<AtomicWaker>>>,
+struct Inner<S: TryStream, T: Topic> {
+    wakers: RwLock<HashMap<T, Arc<AtomicWaker>>>,
     stream: Mutex<Peekable<S>>,
 }
 
-pub struct Subscriber<S: TryStream>
-where
-    S::Ok: Subable,
-{
-    inner: Arc<Inner<S>>,
+pub struct Subscriber<S: TryStream, T: Topic> {
+    inner: Arc<Inner<S, T>>,
 }
 
-impl<S: TryStream> Subscriber<S>
-where
-    S::Ok: Subable,
-{
+impl<S: TryStream, T: Topic> Subscriber<S, T> {
     pub fn new(stream: S) -> Self {
         Self {
             inner: Inner {
@@ -45,7 +36,7 @@ where
         }
     }
 
-    pub fn subscribe(&self, topic: <S::Ok as Subable>::Topic) -> Sub<S> {
+    pub fn subscribe(&self, topic: T) -> Sub<S, T> {
         if self
             .inner
             .wakers
@@ -63,10 +54,7 @@ where
     }
 }
 
-impl<S: TryStream> Drop for Subscriber<S>
-where
-    S::Ok: Subable,
-{
+impl<S: TryStream, T: Topic> Drop for Subscriber<S, T> {
     fn drop(&mut self) {
         for (_, waker) in self.inner.wakers.write().unwrap().drain() {
             // Wake all tasks, that will subsequently return `None`

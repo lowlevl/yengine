@@ -5,90 +5,45 @@ use std::{
     time::SystemTime,
 };
 
-use bytes::{Buf, BufMut};
 use facet::Facet;
 use futures::{
-    AsyncRead, AsyncWrite, SinkExt, StreamExt, TryStream, TryStreamExt, io::AllowStdIo, lock::Mutex,
+    AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, StreamExt, TryStream, TryStreamExt,
+    io::{AllowStdIo, BufReader, Lines},
+    lock::Mutex,
 };
-use futures_codec::{Decoder, Encoder, FramedRead, FramedWrite};
 
 use super::{
     format::{
-        self, Connect, Install, InstallAck, Message, MessageAck, Output, Quit, QuitAck, SetLocal,
-        SetLocalAck, Uninstall, UninstallAck, Unwatch, UnwatchAck, Watch, WatchAck,
+        self, Connect, ErrorIn, Install, InstallAck, Message, MessageAck, Output, Quit, QuitAck,
+        SetLocal, SetLocalAck, Uninstall, UninstallAck, Unwatch, UnwatchAck, Watch, WatchAck,
     },
-    subable::Subscriber,
+    subable::{Subed, Subscriber},
 };
-use crate::{format::ErrorIn, subable::Subed};
 
 mod error;
 pub use error::{Error, Result};
 
-mod msg;
-use msg::{Msg, Topic};
-
-struct Codec;
-
-impl Encoder for Codec {
-    type Item = Msg;
-    type Error = Error;
-
-    fn encode(
-        &mut self,
-        item: Self::Item,
-        dst: &mut futures_codec::BytesMut,
-    ) -> Result<(), Self::Error> {
-        let bytes = item.0.as_bytes();
-
-        dst.reserve(bytes.len() + 1);
-        dst.put(bytes);
-        dst.put_u8(b'\n');
-
-        Ok(())
-    }
-}
-
-impl Decoder for Codec {
-    type Item = Msg;
-    type Error = Error;
-
-    fn decode(
-        &mut self,
-        src: &mut futures_codec::BytesMut,
-    ) -> Result<Option<Self::Item>, Self::Error> {
-        match src.iter().position(|ch| *ch == b'\n') {
-            Some(pos) => {
-                let buf = src.split_to(pos);
-                src.advance(1);
-
-                Ok(Some(Msg(String::from_utf8_lossy(&buf).into_owned())))
-            }
-            None => Ok(None),
-        }
-    }
-}
+mod topic;
+use topic::Topic;
 
 /// The main connector to the Yate Telephone Engine.
 pub struct Engine<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> {
+    rx: Subscriber<Lines<BufReader<I>>, Topic>,
+    tx: Mutex<O>,
+
     pid: u32,
     seq: AtomicUsize,
-
-    rx: Subscriber<FramedRead<I, Codec>>,
-    tx: Mutex<FramedWrite<O, Codec>>,
 }
 
 impl Engine<AllowStdIo<Stdin>, AllowStdIo<Stdout>> {
     /// Initialize a connection to the engine via standard I/O.
     pub fn stdio() -> Self {
-        let rx = FramedRead::new(AllowStdIo::new(std::io::stdin()), Codec);
-        let tx = FramedWrite::new(AllowStdIo::new(std::io::stdout()), Codec);
-
         Self {
+            rx: Subscriber::new(BufReader::new(AllowStdIo::new(std::io::stdin())).lines()),
+            tx: AllowStdIo::new(std::io::stdout()).into(),
+
             pid: std::process::id(),
             seq: Default::default(),
-
-            rx: Subscriber::new(rx),
-            tx: tx.into(),
         }
     }
 }
@@ -97,7 +52,11 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
     async fn send<T: Facet<'static>>(&self, message: &T) -> Result<()> {
         let item = format::to_string(message);
 
-        self.tx.lock().await.send(Msg(item)).await
+        let mut wr = self.tx.lock().await;
+        wr.write_all(item.as_bytes()).await?;
+        wr.write_all(b"\n").await?;
+
+        wr.flush().await.map_err(Into::into)
     }
 
     async fn default_response(&self, recvd: &str) -> Result<()> {
@@ -114,13 +73,13 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
             })
             .await
         } else if let Ok(ErrorIn { original }) = format::from_str(recvd) {
-            tracing::error!("received an error from the engine: {original}");
+            tracing::error!("received an error: {original}");
 
             // TODO: treat error case
 
             Ok(())
         } else {
-            tracing::debug!("unhandled message, dropping: {recvd}");
+            tracing::warn!("unhandled message, dropped: {recvd}");
 
             Ok(())
         }
@@ -132,13 +91,10 @@ impl<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> Engine<I, O> {
 
         futures::stream::try_unfold(sub, async |mut sub| {
             loop {
-                let Some(recvd) = sub.try_next().await? else {
-                    break Ok(None);
-                };
-
-                match recvd {
-                    Subed::Match(recvd) => break Ok(Some((format::from_str(&recvd.0)?, sub))),
-                    Subed::Default(recvd) => self.default_response(&recvd.0).await?,
+                match sub.try_next().await? {
+                    None => break Ok(None),
+                    Some(Subed::No(recvd)) => self.default_response(&recvd).await?,
+                    Some(Subed::Yes(recvd)) => break Ok(Some((format::from_str(&recvd)?, sub))),
                 }
             }
         })
