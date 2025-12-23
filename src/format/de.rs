@@ -14,10 +14,9 @@ impl<'de> Deserializer<'de> {
     }
 
     fn deserialize_scalar(&mut self, partial: Partial<'static>) -> Result<Partial<'static>> {
-        match self.parts.pop_front() {
-            Some(value) => Ok(partial.parse_from_str(&super::upcode::decode(value)?)?),
-            None => Err(Error::MissingValue),
-        }
+        let value = self.parts.pop_front().ok_or(Error::MissingValue)?;
+
+        Ok(partial.parse_from_str(&super::upcode::decode(value)?)?)
     }
 
     fn deserialize_option(
@@ -70,6 +69,12 @@ impl<'de> Deserializer<'de> {
         Ok(partial)
     }
 
+    fn deserialize_enum(&mut self, partial: Partial<'static>) -> Result<Partial<'static>> {
+        let value = self.parts.pop_front().ok_or(Error::MissingValue)?;
+
+        Ok(partial.select_variant_named(value)?)
+    }
+
     fn deserialize_value(
         &mut self,
         mut partial: Partial<'static>,
@@ -96,15 +101,13 @@ impl<'de> Deserializer<'de> {
 
                 Ok(partial)
             }
+            Type::User(UserType::Enum(_)) => self.deserialize_enum(partial),
             _ => match partial.shape().def {
                 Def::Scalar => self.deserialize_scalar(partial),
                 Def::Option(_) => self.deserialize_option(partial, has_default),
                 Def::Map(_) => self.deserialize_map(partial, has_default),
 
-                _ => panic!(
-                    "unable to deserialize type `{}`",
-                    partial.shape().type_identifier
-                ),
+                _ => panic!("unable to deserialize type: {}", partial.shape()),
             },
         }
     }

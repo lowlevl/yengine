@@ -231,21 +231,8 @@ pub struct SetLocalAck {
     pub success: bool,
 }
 
-/// **(>)** The [`Output`] message is used to relay arbitrary
-/// messages to engine's logging output.
-///
-/// This is the proper way of logging messages for programs
-/// that connect to the socket interface as they may not
-/// have the standard error redirected.
-#[derive(Debug, facet::Facet)]
-#[facet(type_tag = "%%>output")]
-pub struct Output {
-    /// Arbitrary unescaped string.
-    pub text: String,
-}
-
-/// **(>)** The [`Connect`] message is used only by
-/// external modules that attach to the socket interface.
+/// **(>)** Setup the connection for
+/// external modules that attach to the _socket interface_.
 ///
 /// As the conection is initiated from the external module
 /// the engine must be informed on the role of the connection.
@@ -259,21 +246,107 @@ pub struct Output {
 #[derive(Debug, facet::Facet)]
 #[facet(type_tag = "%%>connect")]
 pub struct Connect {
-    /// Role of this connection: `global`, `channel`, `play`, `record` or `playrec`.
-    pub role: String,
+    /// Role of this connection.
+    pub role: ConnectRole,
 
     /// Channel to connect this socket to, with it's `id` and optional `type`, assuming `audio` if `None`.
     #[facet(default)]
     pub channel: Option<(String, Option<String>)>,
 }
 
-/// **(>)** The [`Quit`] message is used to tell the engine
-/// we'd like to stop processing messages.
+/// The _role_ of the connection, for the [`Connect`] message.
+#[derive(Debug, facet::Facet)]
+#[facet(rename_all = "lowercase")]
+#[repr(C)]
+pub enum ConnectRole {
+    /// The `global` role.
+    Global,
+
+    /// The `channel` role.
+    Channel,
+
+    /// The `play` role.
+    Play,
+
+    /// The `record` role.
+    Record,
+
+    /// The `playrec` role.
+    PlayRec,
+}
+
+/// **(>)** An _arbitrary message_ to be sent
+/// to engine's logging output.
+#[derive(Debug, facet::Facet)]
+#[facet(type_tag = "%%>output")]
+pub struct Output {
+    /// Arbitrary unescaped string.
+    pub text: String,
+}
+
+/// **(>)** A _debug message_ to be sent
+/// to engine's logging output.
+#[derive(Debug, facet::Facet)]
+#[facet(type_tag = "%%>debug")]
+pub struct Debug {
+    /// The log _level_ of the message.
+    pub level: DebugLevel,
+
+    /// Arbitrary unescaped string.
+    pub text: String,
+}
+
+/// The _log level_ of the [`struct@Debug`] message.
+#[derive(Debug, facet::Facet)]
+#[repr(C)]
+pub enum DebugLevel {
+    /// The `TEST` log level.
+    #[facet(rename = "1")]
+    Test,
+
+    /// The `CRIT` log level.
+    #[facet(rename = "2")]
+    Crit,
+
+    /// The `CONF` log level.
+    #[facet(rename = "3")]
+    Conf,
+
+    /// The `STUB` log level.
+    #[facet(rename = "4")]
+    Stub,
+
+    /// The `WARN` log level.
+    #[facet(rename = "5")]
+    Warn,
+
+    /// The `MILD` log level.
+    #[facet(rename = "6")]
+    Mild,
+
+    /// The `NOTE` log level.
+    #[facet(rename = "7")]
+    Note,
+
+    /// The `CALL` log level.
+    #[facet(rename = "8")]
+    Call,
+
+    /// The `INFO` log level.
+    #[facet(rename = "9")]
+    Info,
+
+    /// The `ALL` log level.
+    #[facet(rename = "10")]
+    All,
+}
+
+/// **(>)** Tell the engine we'd like to stop processing messages.
 #[derive(Debug, facet::Facet)]
 #[facet(type_tag = "%%>quit")]
 pub struct Quit;
 
-/// **(<)** The [`QuitAck`] message signals we can proceed to exit.
+/// **(<)** Signals we can proceed to exit.
 #[derive(Debug, facet::Facet)]
 #[facet(type_tag = "%%<quit")]
 pub struct QuitAck;

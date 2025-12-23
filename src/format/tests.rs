@@ -18,6 +18,11 @@ fn test<T: Facet<'static> + Debug>(input: &str) {
 }
 
 #[test]
+fn errors() {
+    std::panic::catch_unwind(|| test::<ConnectRole>("other")).unwrap_err();
+}
+
+#[test]
 fn error_in() {
     test::<ErrorIn>("Error in:this is an error");
 }
@@ -101,8 +106,31 @@ fn setlocal_ack() {
 }
 
 #[test]
+fn connect() {
+    test::<Connect>("%%>connect:global");
+    test::<Connect>("%%>connect:channel");
+    test::<Connect>("%%>connect:play:ourstream/1");
+    test::<Connect>("%%>connect:record:ourstream/1:audio");
+    test::<Connect>("%%>connect:playrec:ourstream/1:other");
+}
+
+#[test]
 fn output() {
     test::<Output>("%%>output:this is getting logged");
+}
+
+#[test]
+fn debug() {
+    test::<super::Debug>("%%>debug:1:this is getting logged");
+    test::<super::Debug>("%%>debug:2:this is getting logged");
+    test::<super::Debug>("%%>debug:3:this is getting logged");
+    test::<super::Debug>("%%>debug:4:this is getting logged");
+    test::<super::Debug>("%%>debug:5:this is getting logged");
+    test::<super::Debug>("%%>debug:6:this is getting logged");
+    test::<super::Debug>("%%>debug:7:this is getting logged");
+    test::<super::Debug>("%%>debug:8:this is getting logged");
+    test::<super::Debug>("%%>debug:9:this is getting logged");
+    test::<super::Debug>("%%>debug:10:this is getting logged");
 }
 
 #[test]

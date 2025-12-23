@@ -1,4 +1,4 @@
-use facet::{Def, Facet, HasFields, Peek, PeekMap, PeekOption};
+use facet::{Def, Facet, HasFields, Peek, PeekEnum, PeekMap, PeekOption};
 
 #[derive(Default)]
 struct Serializer {
@@ -35,6 +35,14 @@ impl Serializer {
         }
     }
 
+    fn serialize_enum(&mut self, peek: PeekEnum<'_, 'static>) {
+        self.parts.push(
+            peek.variant_name_active()
+                .expect("no active variant")
+                .into(),
+        )
+    }
+
     fn serialize_value(&mut self, peek: Peek<'_, 'static>, has_default: bool) {
         if let Some(tag) = peek.shape().type_tag {
             self.serialize_tag(tag);
@@ -44,6 +52,8 @@ impl Serializer {
             for (item, peek) in peek.fields_for_serialize() {
                 self.serialize_value(peek, has_default || item.field.has_default());
             }
+        } else if let Ok(peek) = peek.into_enum() {
+            self.serialize_enum(peek);
         } else if let Ok(peek) = peek.into_option() {
             self.serialize_option(peek, has_default);
         } else if let Ok(peek) = peek.into_map() {
@@ -53,8 +63,8 @@ impl Serializer {
                 Def::Scalar => self.serialize_scalar(peek),
 
                 _ => panic!(
-                    "unable to serialize type `{}`, stopped at {:?}",
-                    peek.shape().type_identifier,
+                    "unable to serialize type `{}`, still holding {:?}",
+                    peek.shape(),
                     self.parts
                 ),
             }

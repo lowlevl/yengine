@@ -12,10 +12,13 @@ use futures::{
     lock::Mutex,
 };
 
+use crate::format::{ConnectRole, DebugLevel};
+
 use super::{
     format::{
-        self, Connect, ErrorIn, Install, InstallAck, Message, MessageAck, Output, Quit, QuitAck,
-        SetLocal, SetLocalAck, Uninstall, UninstallAck, Unwatch, UnwatchAck, Watch, WatchAck,
+        self, Connect, Debug, ErrorIn, Install, InstallAck, Message, MessageAck, Output, Quit,
+        QuitAck, SetLocal, SetLocalAck, Uninstall, UninstallAck, Unwatch, UnwatchAck, Watch,
+        WatchAck,
     },
     subable::{Subed, Subscriber},
 };
@@ -267,21 +270,32 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
     /// _socket-based_ modules.
     pub async fn connect(
         &self,
-        role: impl Into<String>,
+        role: ConnectRole,
         channel: impl Into<Option<(String, Option<String>)>>,
     ) -> Result<()> {
         let message = Connect {
-            role: role.into(),
+            role,
             channel: channel.into(),
         };
 
         self.send(&message).await
     }
 
-    /// Output some text to engine's log, this is
+    /// Output some _arbitrary text_ to engine's log, this is
     /// especially useful on _socket-based_ modules.
     pub async fn output(&self, text: impl Into<String>) -> Result<()> {
         let message = Output { text: text.into() };
+
+        self.send(&message).await
+    }
+
+    /// Output some _debug text_ to engine's log, this is
+    /// especially useful on _socket-based_ modules.
+    pub async fn debug(&self, level: DebugLevel, text: impl Into<String>) -> Result<()> {
+        let message = Debug {
+            level,
+            text: text.into(),
+        };
 
         self.send(&message).await
     }
