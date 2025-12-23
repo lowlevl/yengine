@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeMap,
-    io::{Stdin, Stdout},
+    io::{self, Stdin, Stdout},
     sync::atomic::{AtomicUsize, Ordering},
     time::SystemTime,
 };
@@ -44,17 +44,22 @@ pub struct Engine<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> {
 impl Engine<AllowStdIo<Stdin>, AllowStdIo<Stdout>> {
     /// Initialize a connection to the engine via standard I/O.
     pub fn stdio() -> Self {
+        Self::from_io(AllowStdIo::new(io::stdin()), AllowStdIo::new(io::stdout()))
+    }
+}
+
+impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
+    /// Initialize a connection to the engine with the provided I/O.
+    pub fn from_io(rx: I, tx: O) -> Self {
         Self {
-            rx: Subscriber::new(BufReader::new(AllowStdIo::new(std::io::stdin())).lines()),
-            tx: AllowStdIo::new(std::io::stdout()).into(),
+            rx: Subscriber::new(BufReader::new(rx).lines()),
+            tx: tx.into(),
 
             pid: std::process::id(),
             seq: Default::default(),
         }
     }
-}
 
-impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
     async fn send<T: Facet<'static>>(&self, message: &T) -> Result<()> {
         let item = format::to_string(message);
 
