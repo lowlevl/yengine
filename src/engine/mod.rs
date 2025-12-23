@@ -1,7 +1,6 @@
 use std::{
     collections::BTreeMap,
     io::{self, Stdin, Stdout},
-    sync::atomic::{AtomicUsize, Ordering},
     time::SystemTime,
 };
 
@@ -36,9 +35,6 @@ use req::Req;
 pub struct Engine<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> {
     rx: Subscriber<Lines<BufReader<I>>, Topic>,
     tx: Mutex<O>,
-
-    pid: u32,
-    seq: AtomicUsize,
 }
 
 impl Engine<AllowStdIo<Stdin>, AllowStdIo<Stdout>> {
@@ -54,9 +50,6 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
         Self {
             rx: Subscriber::new(BufReader::new(rx).lines()),
             tx: tx.into(),
-
-            pid: std::process::id(),
-            seq: Default::default(),
         }
     }
 
@@ -215,10 +208,12 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
         Ok(ack.value)
     }
 
-    fn id(&self) -> String {
-        let seq = self.seq.fetch_add(1, Ordering::Relaxed);
+    fn id() -> String {
+        let id = (0..12)
+            .map(|_| fastrand::alphanumeric())
+            .collect::<String>();
 
-        format!("yengine.{}.{seq}", self.pid)
+        format!("yengine.{id}")
     }
 
     /// Send a [`Message`] to the telephony engine for processing.
@@ -228,7 +223,7 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
         retvalue: impl Into<String>,
         kv: BTreeMap<String, String>,
     ) -> Result<(bool, String, BTreeMap<String, String>)> {
-        let id = self.id();
+        let id = Self::id();
         let message = Message {
             id,
             time: SystemTime::now()

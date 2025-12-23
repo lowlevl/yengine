@@ -19,6 +19,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 futures = "0.3.31"
+fastrand = "2.3.0"
 
 tracing = "0.1.43"
 thiserror = "2.0.17"
