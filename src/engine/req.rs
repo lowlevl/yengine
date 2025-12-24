@@ -3,6 +3,7 @@ use std::ops::{Deref, DerefMut};
 use crate::format::Message;
 
 #[derive(Debug)]
+#[must_use = "messages must be ack'ed, even if not processed with Engine::ack"]
 pub struct Req {
     inner: Option<Message>,
 }
@@ -34,7 +35,7 @@ impl DerefMut for Req {
 impl Drop for Req {
     fn drop(&mut self) {
         if let Some(inner) = &self.inner {
-            panic!("message `{inner:?}` was not ack'ed, every message must be ack'ed");
+            tracing::error!("message `{inner:?}` was not ack'ed, every message must be ack'ed");
         }
     }
 }

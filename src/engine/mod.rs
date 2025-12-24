@@ -53,16 +53,6 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
         }
     }
 
-    async fn send<T: Facet<'static>>(&self, message: &T) -> Result<()> {
-        let item = format::to_string(message);
-
-        let mut wr = self.tx.lock().await;
-        wr.write_all(item.as_bytes()).await?;
-        wr.write_all(b"\n").await?;
-
-        wr.flush().await.map_err(Into::into)
-    }
-
     async fn default_response(&self, recvd: &str) -> Result<()> {
         if let Ok(Message {
             id, retvalue, kv, ..
@@ -79,7 +69,7 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
         } else if let Ok(ErrorIn { original }) = format::from_str(recvd) {
             tracing::error!("received an error: {original}");
 
-            // TODO: treat error case
+            // FIXME: treat error case with a correct topic
 
             Ok(())
         } else {
@@ -103,6 +93,16 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
             }
         })
         .boxed() // FIXME: maybe remove this `Box`
+    }
+
+    async fn send<T: Facet<'static>>(&self, message: &T) -> Result<()> {
+        let item = format::to_string(message);
+
+        let mut wr = self.tx.lock().await;
+        wr.write_all(item.as_bytes()).await?;
+        wr.write_all(b"\n").await?;
+
+        wr.flush().await.map_err(Into::into)
     }
 
     /// Request the engine to install a message handler with the provided `priority`.
@@ -213,7 +213,7 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
             .map(|_| fastrand::alphanumeric())
             .collect::<String>();
 
-        format!("yengine.{id}")
+        format!("{}.{id}", env!("CARGO_PKG_NAME"))
     }
 
     /// Send a [`Message`] to the telephony engine for processing.
