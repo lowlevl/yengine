@@ -46,6 +46,9 @@ impl Engine<AllowStdIo<Stdin>, AllowStdIo<Stdout>> {
 
 impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
     /// Initialize a connection to the engine with the provided I/O.
+    ///
+    /// If the I/O is a socket or a TCP stream, the module must register itself
+    /// with a [`Self::connect`] before doing anything.
     pub fn from_io(rx: I, tx: O) -> Self {
         Self {
             rx: Subscriber::new(BufReader::new(rx).lines()),
@@ -245,7 +248,7 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
         Ok((ack.processed, ack.retvalue, ack.kv))
     }
 
-    /// Receive messages from teh telephony engine for processing.
+    /// Receive messages from the telephony engine for processing.
     pub fn messages(&self) -> impl TryStream<Ok = Req, Error = Error> {
         self.subscribe(Topic::Message).map_ok(Req::new)
     }
@@ -266,7 +269,7 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
         self.send(&message).await
     }
 
-    /// Send a [`Connect`] message to the engine for
+    /// Send a _connect_ message to the engine for
     /// _socket-based_ modules.
     pub async fn connect(
         &self,
