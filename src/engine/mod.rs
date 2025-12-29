@@ -29,7 +29,7 @@ mod topic;
 use topic::Topic;
 
 mod req;
-use req::Req;
+pub use req::Req;
 
 /// The main connector to the Yate Telephone Engine.
 pub struct Engine<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> {

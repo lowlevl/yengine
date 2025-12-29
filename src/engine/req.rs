@@ -2,6 +2,10 @@ use std::ops::{Deref, DerefMut};
 
 use crate::format::Message;
 
+#[cfg(doc)]
+use super::Engine;
+
+/// A request to process a [`Message`], **MUST** be [`Engine::ack`]'ed.
 #[derive(Debug)]
 #[must_use = "messages must be ack'ed, even if not processed with Engine::ack"]
 pub struct Req {

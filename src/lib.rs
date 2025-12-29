@@ -8,4 +8,4 @@ pub mod format;
 mod subable;
 
 mod engine;
-pub use engine::{Engine, Error};
+pub use engine::{Engine, Error, Req};
