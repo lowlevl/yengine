@@ -8,6 +8,7 @@ pub enum Topic {
     UninstallAck(String),
     WatchAck(String),
     UnwatchAck(String),
+    Watch,
     SetLocalAck(String),
     Message,
     MessageAck(String),
@@ -38,6 +39,14 @@ impl subable::Topic for Topic {
             Topic::QuitAck
         } else {
             Topic::Other
+        }
+    }
+
+    fn fallback(self) -> Self {
+        match self {
+            // Fallback unhandled `MessageAck` as `Watch`
+            Self::MessageAck(_) => Self::Watch,
+            other => other,
         }
     }
 }

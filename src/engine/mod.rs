@@ -171,6 +171,11 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
         Ok(ack.success)
     }
 
+    /// Receive _watches_ from the telephony engine.
+    pub fn watches(&self) -> impl TryStream<Ok = MessageAck, Error = Error> {
+        self.subscribe(Topic::Watch)
+    }
+
     /// Request the engine to set a _local variable_.
     pub async fn setlocal(
         &self,
@@ -246,7 +251,7 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
         Ok((ack.processed, ack.retvalue, ack.kv))
     }
 
-    /// Receive messages from the telephony engine for processing.
+    /// Receive _messages_ from the telephony engine for processing.
     pub fn messages(&self) -> impl TryStream<Ok = Req, Error = Error> {
         self.subscribe(Topic::Message).map_ok(Req::new)
     }
