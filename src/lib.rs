@@ -5,7 +5,6 @@
 #![warn(missing_docs, clippy::unimplemented)]
 
 pub mod format;
-mod subable;
 
 mod engine;
 pub use engine::{Engine, Error, Req};

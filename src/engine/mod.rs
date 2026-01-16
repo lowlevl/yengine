@@ -10,16 +10,12 @@ use futures::{
     io::{AllowStdIo, BufReader, Lines},
     lock::Mutex,
 };
+use subable::{Item, Subable};
 
-use crate::format::{ConnectRole, DebugLevel};
-
-use super::{
-    format::{
-        self, Connect, Debug, ErrorIn, Install, InstallAck, Message, MessageAck, Output, Quit,
-        QuitAck, SetLocal, SetLocalAck, Uninstall, UninstallAck, Unwatch, UnwatchAck, Watch,
-        WatchAck,
-    },
-    subable::{Subed, Subscriber},
+use super::format::{
+    self, Connect, ConnectRole, Debug, DebugLevel, ErrorIn, Install, InstallAck, Message,
+    MessageAck, Output, Quit, QuitAck, SetLocal, SetLocalAck, Uninstall, UninstallAck, Unwatch,
+    UnwatchAck, Watch, WatchAck,
 };
 
 mod error;
@@ -33,7 +29,7 @@ pub use req::Req;
 
 /// The main connector to the Yate Telephone Engine.
 pub struct Engine<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> {
-    rx: Subscriber<Lines<BufReader<I>>, Topic>,
+    rx: Subable<Lines<BufReader<I>>, Topic>,
     tx: Mutex<O>,
 }
 
@@ -51,7 +47,7 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
     /// with a [`Self::connect`] before doing anything.
     pub fn from_io(rx: I, tx: O) -> Self {
         Self {
-            rx: Subscriber::new(BufReader::new(rx).lines()),
+            rx: Subable::new(BufReader::new(rx).lines()),
             tx: tx.into(),
         }
     }
@@ -84,14 +80,16 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
 
     #[tracing::instrument(skip(self))]
     fn subscribe<T: Facet<'static>>(&self, topic: Topic) -> impl TryStream<Ok = T, Error = Error> {
-        let sub = self.rx.subscribe(topic);
+        let subed = self.rx.subscribe(topic);
 
-        futures::stream::try_unfold(sub, async |mut sub| {
+        futures::stream::try_unfold(subed, async |mut sub| {
             loop {
                 match sub.try_next().await? {
                     None => break Ok(None),
-                    Some(Subed::No(recvd)) => self.default_response(&recvd).await?,
-                    Some(Subed::Yes(recvd)) => break Ok(Some((format::from_str(&recvd)?, sub))),
+                    Some(Item::Unhandled(recvd)) => self.default_response(&recvd).await?,
+                    Some(Item::Subscribed(recvd)) => {
+                        break Ok(Some((format::from_str(&recvd)?, sub)));
+                    }
                 }
             }
         })
