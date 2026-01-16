@@ -1,6 +1,6 @@
 [package]
 name = "yengine"
-version = "0.0.7-alpha.1"
+version = "0.0.7-alpha.2"
 edition = "2024"
 keywords = ["yate", "extmodule", "telephony"]
 description = "Communication library for the Yate Engine external module protocol."
@@ -25,4 +25,4 @@ tracing = "0.1.43"
 thiserror = "2.0.17"
 
 facet = { version = "0.42.0", features = ["reflect"] }
-subable = "0.0.0"
+subable = "0.0.1"
