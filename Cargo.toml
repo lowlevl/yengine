@@ -24,5 +24,5 @@ fastrand = "2.3.0"
 tracing = "0.1.43"
 thiserror = "2.0.17"
 
-facet = { version = "0.35.0", features = ["reflect"] }
+facet = { version = "0.42.0", features = ["reflect"] }
 subable = "0.0.0"

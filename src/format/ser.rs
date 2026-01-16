@@ -50,7 +50,14 @@ impl Serializer {
 
         if let Ok(peek) = peek.into_struct() {
             for (item, peek) in peek.fields_for_serialize() {
-                self.serialize_value(peek, has_default || item.field.has_default());
+                self.serialize_value(
+                    peek,
+                    has_default
+                        || item
+                            .field
+                            .map(|field| field.has_default())
+                            .unwrap_or_default(),
+                );
             }
         } else if let Ok(peek) = peek.into_enum() {
             self.serialize_enum(peek);
