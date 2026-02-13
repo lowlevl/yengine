@@ -1,3 +1,5 @@
+//! An abstraction of the telephony [`Engine`].
+
 use std::{
     collections::BTreeMap,
     io::{self, Stdin, Stdout},
@@ -12,11 +14,12 @@ use futures::{
 };
 use subable::{Item, Subable};
 
-use super::format::{
+use super::wire::{
     self, Connect, ConnectRole, Debug, DebugLevel, ErrorIn, Install, InstallAck, Message,
     MessageAck, Output, Quit, QuitAck, SetLocal, SetLocalAck, Uninstall, UninstallAck, Unwatch,
     UnwatchAck, Watch, WatchAck,
 };
+use crate::module::Module;
 
 mod error;
 pub use error::{Error, Result};
@@ -24,11 +27,15 @@ pub use error::{Error, Result};
 mod topic;
 use topic::Topic;
 
-mod req;
-pub use req::Req;
+mod request;
+pub use request::Request;
 
-/// The main connector to the Yate Telephone Engine.
-pub struct Engine<I: AsyncRead + Unpin, O: AsyncWrite + Unpin> {
+/// A connector to the telephony engine.
+pub struct Engine<I, O>
+where
+    I: AsyncRead + Send + Unpin,
+    O: AsyncWrite + Send + Unpin,
+{
     rx: Subable<Lines<BufReader<I>>, Topic>,
     tx: Mutex<O>,
 }
@@ -40,7 +47,11 @@ impl Engine<AllowStdIo<Stdin>, AllowStdIo<Stdout>> {
     }
 }
 
-impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
+impl<I, O> Engine<I, O>
+where
+    I: AsyncRead + Send + Unpin,
+    O: AsyncWrite + Send + Unpin,
+{
     /// Initialize a connection to the engine with the provided I/O.
     ///
     /// If the I/O is a socket or a TCP stream, the module must register itself
@@ -55,7 +66,7 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
     async fn default_response(&self, recvd: &str) -> Result<()> {
         if let Ok(Message {
             id, retvalue, kv, ..
-        }) = format::from_str(recvd)
+        }) = wire::from_str(recvd)
         {
             self.send(&MessageAck {
                 id,
@@ -65,7 +76,7 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
                 kv,
             })
             .await
-        } else if let Ok(ErrorIn { original }) = format::from_str(recvd) {
+        } else if let Ok(ErrorIn { original }) = wire::from_str(recvd) {
             tracing::error!("received an error: {original}");
 
             // FIXME: treat error case with a correct topic
@@ -80,15 +91,15 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
 
     #[tracing::instrument(skip(self))]
     fn subscribe<T: Facet<'static>>(&self, topic: Topic) -> impl TryStream<Ok = T, Error = Error> {
-        let subed = self.rx.subscribe(topic);
+        let queue = self.rx.subscribe(topic);
 
-        futures::stream::try_unfold(subed, async |mut sub| {
+        futures::stream::try_unfold(queue, async |mut queue| {
             loop {
-                match sub.try_next().await? {
+                match queue.try_next().await? {
                     None => break Ok(None),
                     Some(Item::Unhandled(recvd)) => self.default_response(&recvd).await?,
                     Some(Item::Subscribed(recvd)) => {
-                        break Ok(Some((format::from_str(&recvd)?, sub)));
+                        break Ok(Some((wire::from_str(&recvd)?, queue)));
                     }
                 }
             }
@@ -97,13 +108,37 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
     }
 
     async fn send<T: Facet<'static>>(&self, message: &T) -> Result<()> {
-        let item = format::to_string(message);
+        let item = wire::to_string(message);
 
         let mut wr = self.tx.lock().await;
         wr.write_all(item.as_bytes()).await?;
         wr.write_all(b"\n").await?;
 
         wr.flush().await.map_err(Into::into)
+    }
+
+    /// Attach a [`Module`] to the engine to process messages and watches.
+    ///
+    /// This is a handy helper to abstract the management of message requests
+    /// and ensure they are always acknowledged while reducing boilerplate code.
+    pub async fn attach<M: Module>(self, module: M) -> Result<(), M::Error> {
+        futures::try_join!(
+            self.watches()
+                .err_into::<M::Error>()
+                .try_for_each_concurrent(None, |watch| { module.on_watch(&self, watch) }),
+            self.messages()
+                .err_into::<M::Error>()
+                .try_for_each_concurrent(None, async |mut req| {
+                    let processed = module.on_message(&self, &mut req).await?;
+
+                    Ok(self.ack(req, processed).await?)
+                }),
+            module.install(&self)
+        )?;
+
+        tracing::debug!("processed all messages, exiting");
+
+        Ok(())
     }
 
     /// Request the engine to install a message handler with the provided `priority`.
@@ -252,13 +287,13 @@ impl<I: AsyncRead + Send + Unpin, O: AsyncWrite + Send + Unpin> Engine<I, O> {
     }
 
     /// Receive _messages_ from the telephony engine for processing.
-    pub fn messages(&self) -> impl TryStream<Ok = Req, Error = Error> {
-        self.subscribe(Topic::Message).map_ok(Req::new)
+    pub fn messages(&self) -> impl TryStream<Ok = Request, Error = Error> {
+        self.subscribe(Topic::Message).map_ok(Request::new)
     }
 
     /// Acknowledge the message from the engine,
     /// letting it forward it to the next handler if `!processed`.
-    pub async fn ack(&self, req: Req, processed: bool) -> Result<()> {
+    pub async fn ack(&self, req: Request, processed: bool) -> Result<()> {
         let original = req.into_inner();
 
         let message = MessageAck {

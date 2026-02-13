@@ -1,4 +1,4 @@
-//! Format of messages in the Yate Engine external module protocol.
+//! Wire-format (de)serialization.
 //!
 //! ## Command direction
 //!

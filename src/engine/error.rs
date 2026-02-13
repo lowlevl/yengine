@@ -12,7 +12,7 @@ pub enum Error {
 
     /// An error occured while (de)-serializing messages.
     #[error("format error: {0}")]
-    Format(#[from] crate::format::Error),
+    Format(#[from] crate::wire::Error),
 
     /// The data stream was closed before expected.
     #[error("got an unexpected end of stream from engine")]

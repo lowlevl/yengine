@@ -1,18 +1,18 @@
 use std::ops::{Deref, DerefMut};
 
-use crate::format::Message;
+use crate::wire::Message;
 
 #[cfg(doc)]
 use super::Engine;
 
-/// A request to process a [`Message`], **MUST** be [`Engine::ack`]'ed.
+/// A request to process a [`Message`], it _must_ be ack'd or the messages will block server-side.
 #[derive(Debug)]
 #[must_use = "messages must be ack'ed, even if not processed with Engine::ack"]
-pub struct Req {
+pub struct Request {
     inner: Option<Message>,
 }
 
-impl Req {
+impl Request {
     pub(super) fn new(inner: Message) -> Self {
         Self { inner: Some(inner) }
     }
@@ -22,7 +22,7 @@ impl Req {
     }
 }
 
-impl Deref for Req {
+impl Deref for Request {
     type Target = Message;
 
     fn deref(&self) -> &Self::Target {
@@ -30,13 +30,13 @@ impl Deref for Req {
     }
 }
 
-impl DerefMut for Req {
+impl DerefMut for Request {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.inner.as_mut().expect("Req was already into_inner'ed")
     }
 }
 
-impl Drop for Req {
+impl Drop for Request {
     fn drop(&mut self) {
         if let Some(inner) = &self.inner {
             tracing::error!("message `{inner:?}` was not ack'ed, every message must be ack'ed");

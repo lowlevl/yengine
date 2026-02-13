@@ -1,4 +1,4 @@
-use crate::format::{
+use crate::wire::{
     self, InstallAck, Message, MessageAck, QuitAck, SetLocalAck, UninstallAck, UnwatchAck, WatchAck,
 };
 
@@ -21,21 +21,21 @@ impl subable::Topic for Topic {
     type Item = String;
 
     fn topic(item: &Self::Item) -> Self {
-        if let Ok(msg) = format::from_str::<InstallAck>(item) {
+        if let Ok(msg) = wire::from_str::<InstallAck>(item) {
             Topic::InstallAck(msg.name)
-        } else if let Ok(msg) = format::from_str::<UninstallAck>(item) {
+        } else if let Ok(msg) = wire::from_str::<UninstallAck>(item) {
             Topic::UninstallAck(msg.name)
-        } else if let Ok(msg) = format::from_str::<WatchAck>(item) {
+        } else if let Ok(msg) = wire::from_str::<WatchAck>(item) {
             Topic::WatchAck(msg.name)
-        } else if let Ok(msg) = format::from_str::<UnwatchAck>(item) {
+        } else if let Ok(msg) = wire::from_str::<UnwatchAck>(item) {
             Topic::UnwatchAck(msg.name)
-        } else if let Ok(msg) = format::from_str::<SetLocalAck>(item) {
+        } else if let Ok(msg) = wire::from_str::<SetLocalAck>(item) {
             Topic::SetLocalAck(msg.name)
-        } else if format::from_str::<Message>(item).is_ok() {
+        } else if wire::from_str::<Message>(item).is_ok() {
             Topic::Message
-        } else if let Ok(msg) = format::from_str::<MessageAck>(item) {
+        } else if let Ok(msg) = wire::from_str::<MessageAck>(item) {
             Topic::MessageAck(msg.id)
-        } else if format::from_str::<QuitAck>(item).is_ok() {
+        } else if wire::from_str::<QuitAck>(item).is_ok() {
             Topic::QuitAck
         } else {
             Topic::Other
