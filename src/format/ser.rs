@@ -37,8 +37,9 @@ impl Serializer {
 
     fn serialize_enum(&mut self, peek: PeekEnum<'_, 'static>) {
         self.parts.push(
-            peek.variant_name_active()
+            peek.active_variant()
                 .expect("no active variant")
+                .effective_name()
                 .into(),
         )
     }

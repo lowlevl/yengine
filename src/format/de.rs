@@ -45,7 +45,7 @@ impl<'de> Deserializer<'de> {
         mut partial: Partial<'static>,
         has_default: bool,
     ) -> Result<Partial<'static>> {
-        partial = partial.begin_map()?;
+        partial = partial.init_map()?;
 
         self.parts = self
             .parts
