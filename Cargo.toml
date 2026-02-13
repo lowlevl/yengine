@@ -1,6 +1,6 @@
 [package]
 name = "yengine"
-version = "0.0.7-alpha.2"
+version = "0.0.8"
 edition = "2024"
 keywords = ["yate", "extmodule", "telephony"]
 description = "Communication library for the Yate Engine external module protocol."
